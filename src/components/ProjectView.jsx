@@ -371,32 +371,29 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       }
 
       // Client / Owner Name
-      const clientPattern = /(?:Owner|Client)\s*:\s*(.*?)(?:\(|Engineering|Division|EPC|Contractor|Consultant|TITLE|\n|$)/i;
+      const clientPattern = /(?:Owner|Client)\s*:\s*(.{1,80}?)(?:\s{2,}|\(|Engineering|Division|EPC|Contractor|Consultant|TITLE|PROJECT|\n|$)/i;
       const clientMatch = fullText.match(clientPattern);
       const extractedClient = clientMatch?.[1]?.trim() || '';
 
       // Contractor / EPC
-      const contractorPattern = /(?:EPC\s*Contractor|Contractor|EPC)\s*:\s*(.*?)(?:Unit|Sector|Delhi|Consultant|Owner|TITLE|\n|$)/i;
+      const contractorPattern = /(?:EPC\s*Contractor|Contractor|EPC)\s*:\s*(.{1,80}?)(?:\s{2,}|Unit|Sector|Delhi|Consultant|Owner|TITLE|PROJECT|\n|$)/i;
       const contractorMatch = fullText.match(contractorPattern);
       const extractedContractor = contractorMatch?.[1]?.trim() || '';
 
       // Consultant
-      const consultantPattern = /Consultant\s*:\s*(.*?)(?:Director|Office|Owner|EPC|TITLE|\n|$)/i;
+      const consultantPattern = /Consultant\s*:\s*(.{1,80}?)(?:\s{2,}|Director|Office|Owner|EPC|TITLE|PROJECT|\n|$)/i;
       const consultantMatch = fullText.match(consultantPattern);
       const extractedConsultant = consultantMatch?.[1]?.trim() || '';
 
       // Project / Description
       const descPatterns = [
-        /(?:PROJECT|DESCRIPTION|PROJECT\s*NAME)\s*:\s*(.*?)(?=\b(?:Owner|Client|EPC|Contractor|Consultant|DRG|DWG|DRAWING|NTPC|SCALE|DATE|REV|STATUS|SHEET|PAGE|Stamp|REFERENCE|TITLE)\b|$)/i,
+        /(?:PROJECT|DESCRIPTION|PROJECT\s*NAME)\s*:\s*(.{1,120}?)(?:\s{2,}|\b(?:Owner|Client|EPC|Contractor|Consultant|DRG|DWG|DRAWING|NTPC|SCALE|DATE|REV|STATUS|SHEET|PAGE|Stamp|REFERENCE|TITLE)\b|\n|$)/i,
       ];
       let extractedDesc = '';
       for (const pat of descPatterns) {
         const m = fullText.match(pat);
         if (m?.[1]) {
-          let cleaned = m[1].trim();
-          // Remove stray newlines or multiple spaces
-          cleaned = cleaned.replace(/\s+/g, ' ');
-          extractedDesc = cleaned;
+          extractedDesc = m[1].replace(/\s+/g, ' ').trim();
           break;
         }
       }
