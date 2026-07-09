@@ -5,15 +5,6 @@ export const AppContext = createContext(null);
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
   { id: 'u1', name: 'Aman Chhabra',   email: 'aman@tranzenergy.in',   role: 'Admin',           avatar: 'AC', color: '#6366f1' },
-  { id: 'u2', name: 'Priya Mehta',    email: 'priya@tranzenergy.in',  role: 'Project Manager',  avatar: 'PM', color: '#06b6d4' },
-  { id: 'u3', name: 'Arun Verma',     email: 'arun@tranzenergy.in',   role: 'Senior Engineer',  avatar: 'AV', color: '#10b981' },
-  { id: 'u4', name: 'Sunita Rao',     email: 'sunita@tranzenergy.in', role: 'Engineer',         avatar: 'SR', color: '#f59e0b' },
-  { id: 'u5', name: 'Vikram Nair',    email: 'vikram@tranzenergy.in', role: 'Engineer',         avatar: 'VN', color: '#8b5cf6' },
-  { id: 'u6', name: 'Deepa Singh',    email: 'deepa@tranzenergy.in',  role: 'Engineer',         avatar: 'DS', color: '#ec4899' },
-  { id: 'u7', name: 'Manoj Kumar',    email: 'manoj@tranzenergy.in',  role: 'Engineer',         avatar: 'MK', color: '#14b8a6' },
-  { id: 'u8', name: 'Kavitha P.',     email: 'kavitha@tranzenergy.in',role: 'Engineer',         avatar: 'KP', color: '#f97316' },
-  { id: 'u9', name: 'Suresh B.',      email: 'suresh@tranzenergy.in', role: 'Senior Engineer',  avatar: 'SB', color: '#0ea5e9' },
-  { id: 'u10',name: 'Ritu Agarwal',   email: 'ritu@tranzenergy.in',   role: 'Viewer',           avatar: 'RA', color: '#a78bfa' },
 ];
 
 const SEED_PROJECTS = [];
@@ -25,7 +16,7 @@ const STATUSES = ['IFA', 'AFC', 'Superseded'];
 const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
 const SEED_PROPOSALS = [];
 
-const STORAGE_KEY = 'tranzenergy_v3';
+const STORAGE_KEY = 'tranzenergy_v4';
 
 function loadState() {
   try {
