@@ -326,10 +326,12 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       };
 
       let extractedCode = '';
-      for (const pat of dwgNoPatterns) {
-        const matches = fullText.matchAll(new RegExp(pat.source, pat.flags + 'g'));
-        for (const m of matches) {
-          const val = m[1]?.trim();
+      for (let i = 0; i < dwgNoPatterns.length; i++) {
+        const matches = fullText.matchAll(new RegExp(dwgNoPatterns[i].source, dwgNoPatterns[i].flags + 'g'));
+        const matchArray = Array.from(matches);
+        for (let j = 0; j < matchArray.length; j++) {
+          const m = matchArray[j];
+          const val = m[1] ? m[1].trim() : '';
           if (val && val.length >= 5 && (val.includes('-') || val.includes('/') || val.includes('_')) && !isCommonWord(val) && !isDate(val)) {
             extractedCode = val.toUpperCase();
             break;
@@ -344,9 +346,9 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
         /(?:DRAWING\s*TITLE|TITLE\s*OF\s*DRAWING|SHEET\s*TITLE)[\s.:–\-]+(.*?)(?=\b(?:Owner|Client|EPC|Contractor|Consultant|DRG|DWG|DRAWING|NTPC|SCALE|DATE|REV|STATUS|SHEET|PAGE|Stamp|REFERENCE)\b|$)/i,
       ];
       let extractedTitle = '';
-      for (const pat of titlePatterns) {
-        const m = fullText.match(pat);
-        if (m?.[1]) {
+      for (let i = 0; i < titlePatterns.length; i++) {
+        const m = fullText.match(titlePatterns[i]);
+        if (m && m[1]) {
           let cleaned = m[1].trim();
           if (cleaned && !cleaned.toUpperCase().includes('DRAWING NOS') && !cleaned.toUpperCase().includes('REFERENCE DRAWINGS')) {
             cleaned = cleaned.replace(/\s+[A-Z0-9]{2,10}(?:[-/_][A-Z0-9]{1,10}){2,6}\s*$/i, '');
@@ -365,35 +367,35 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
         /\b(Rev\s*[0-9]{1,2})\b/i,
       ];
       let extractedRev = '';
-      for (const pat of revPatterns) {
-        const m = fullText.match(pat);
-        if (m?.[1]) { extractedRev = m[1].replace(/\s+/g, '').toUpperCase(); break; }
+      for (let i = 0; i < revPatterns.length; i++) {
+        const m = fullText.match(revPatterns[i]);
+        if (m && m[1]) { extractedRev = m[1].replace(/\s+/g, '').toUpperCase(); break; }
       }
 
       // Client / Owner Name
       const clientPattern = /(?:Owner|Client)\s*:\s*(.{1,80}?)(?:\s{2,}|\(|Engineering|Division|EPC|Contractor|Consultant|TITLE|PROJECT|\n|$)/i;
       const clientMatch = fullText.match(clientPattern);
-      const extractedClient = clientMatch?.[1]?.trim() || '';
+      const extractedClient = (clientMatch && clientMatch[1]) ? clientMatch[1].trim() : '';
 
       // Contractor / EPC
       const contractorPattern = /(?:EPC\s*Contractor|Contractor|EPC)\s*:\s*(.{1,80}?)(?:\s{2,}|Unit|Sector|Delhi|Consultant|Owner|TITLE|PROJECT|\n|$)/i;
       const contractorMatch = fullText.match(contractorPattern);
-      const extractedContractor = contractorMatch?.[1]?.trim() || '';
+      const extractedContractor = (contractorMatch && contractorMatch[1]) ? contractorMatch[1].trim() : '';
 
       // Consultant
       const consultantPattern = /Consultant\s*:\s*(.{1,80}?)(?:\s{2,}|Director|Office|Owner|EPC|TITLE|PROJECT|\n|$)/i;
       const consultantMatch = fullText.match(consultantPattern);
-      const extractedConsultant = consultantMatch?.[1]?.trim() || '';
+      const extractedConsultant = (consultantMatch && consultantMatch[1]) ? consultantMatch[1].trim() : '';
 
       // Project / Description
       const descPatterns = [
         /(?:PROJECT|DESCRIPTION|PROJECT\s*NAME)\s*:\s*(.{1,120}?)(?:\s{2,}|\b(?:Owner|Client|EPC|Contractor|Consultant|DRG|DWG|DRAWING|NTPC|SCALE|DATE|REV|STATUS|SHEET|PAGE|Stamp|REFERENCE|TITLE)\b|\n|$)/i,
       ];
       let extractedDesc = '';
-      for (const pat of descPatterns) {
-        const m = fullText.match(pat);
-        if (m?.[1]) {
-          extractedDesc = m[1].replace(/\s+/g, ' ').trim();
+      for (let i = 0; i < descPatterns.length; i++) {
+        const m = fullText.match(descPatterns[i]);
+        if (m && m[1]) {
+          extractedDesc = String(m[1]).replace(/\s+/g, ' ').trim();
           break;
         }
       }
