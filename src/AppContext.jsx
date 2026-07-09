@@ -196,6 +196,21 @@ function saveState(data) {
 export function AppProvider({ children }) {
   const saved = loadState();
 
+  // Patch existing localStorage so the user name updates for returning users
+  if (saved && saved.users) {
+    const adminUser = saved.users.find(u => u.id === 'u1');
+    if (adminUser && adminUser.name === 'Raj Sharma') {
+      adminUser.name = 'Aman Chhabra';
+      adminUser.email = 'aman@tranzenergy.in';
+      adminUser.avatar = 'AC';
+    }
+  }
+  if (saved && saved.currentUser && saved.currentUser.id === 'u1' && saved.currentUser.name === 'Raj Sharma') {
+    saved.currentUser.name = 'Aman Chhabra';
+    saved.currentUser.email = 'aman@tranzenergy.in';
+    saved.currentUser.avatar = 'AC';
+  }
+
   const [currentUser, setCurrentUser] = useState(saved?.currentUser || null);
   const [users,       setUsers]       = useState(saved?.users       || SEED_USERS);
   const [projects,    setProjects]    = useState(saved?.projects    || SEED_PROJECTS);
