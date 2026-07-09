@@ -434,10 +434,32 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
   };
 
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!code.trim() || !title.trim()) return;
-    setUploading(true);
+    
+    let uploadedUrl = null;
+    if (pdfFile) {
+      setParseMsg('⏳ Uploading file to Vercel Storage...');
+      setUploading(true);
+      try {
+        const response = await fetch(`/api/upload?filename=${encodeURIComponent(pdfFile.name)}`, {
+          method: 'POST',
+          body: pdfFile, // send raw file
+        });
+        if (!response.ok) throw new Error('Upload failed');
+        const blob = await response.json();
+        uploadedUrl = blob.url;
+      } catch (err) {
+        console.error(err);
+        setParseMsg('⚠️ Upload failed: ' + err.message);
+        setUploading(false);
+        return;
+      }
+    } else {
+      setUploading(true);
+    }
+
     const dwg = createDrawing({
       code,
       title,
@@ -446,13 +468,14 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       subType,
       projectId: project.id,
       status,
-      pdfData: pdfDataUrl,
+      pdfData: uploadedUrl || pdfDataUrl,
       clientName,
       consultant,
       contractor,
       changeSummary: 'Initial issue R0.'
     });
-    setTimeout(() => { setUploading(false); onCreated(dwg?.id || null); }, 200);
+    setUploading(false);
+    onCreated(dwg?.id || null);
   };
 
   return (

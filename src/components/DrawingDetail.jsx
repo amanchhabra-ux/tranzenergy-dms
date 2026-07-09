@@ -502,8 +502,23 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
     if (!pdfFile) { alert('Please select a PDF file.'); return; }
     if (!summary.trim()) { alert('Please enter a change summary.'); return; }
     setUploading(true);
-    uploadRevision(drawing.id, summary, pdfDataUrl, status);
-    setTimeout(() => { setUploading(false); onUploaded(); }, 300);
+
+    try {
+      const response = await fetch(`/api/upload?filename=${encodeURIComponent(pdfFile.name)}`, {
+        method: 'POST',
+        body: pdfFile,
+      });
+      if (!response.ok) throw new Error('Upload failed');
+      const blob = await response.json();
+      
+      uploadRevision(drawing.id, summary, blob.url, status);
+      setUploading(false);
+      onUploaded();
+    } catch (err) {
+      console.error(err);
+      alert('⚠️ Upload failed: ' + err.message);
+      setUploading(false);
+    }
   };
 
   return (

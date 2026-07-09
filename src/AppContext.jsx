@@ -175,17 +175,31 @@ function loadState() {
   } catch { return null; }
 }
 
+async function deleteBlobUrl(url) {
+  if (!url || !url.startsWith('http')) return;
+  try {
+    await fetch('/api/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+  } catch (e) {
+    console.error('Failed to delete blob:', url, e);
+  }
+}
+
 function saveState(data) {
   try {
-    // Strip pdfData before persisting to avoid quota errors
+    // We now store Vercel Blob URLs instead of base64, so we don't need to strip them.
+    // To support old data gracefully, we strip non-http blob data to prevent quota errors.
     const stripped = {
       ...data,
       drawings: data.drawings.map(d => ({
         ...d,
-        versions: d.versions.map(v => ({ ...v, pdfData: null })),
-        pdfData: null
+        versions: d.versions.map(v => ({ ...v, pdfData: v.pdfData?.startsWith('http') ? v.pdfData : null })),
+        pdfData: d.pdfData?.startsWith('http') ? d.pdfData : null
       })),
-      proposals: (data.proposals || []).map(p => ({ ...p, fileData: null }))
+      proposals: (data.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith('http') ? p.fileData : null }))
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
   } catch (e) {
@@ -335,8 +349,14 @@ export function AppProvider({ children }) {
 
   const deleteDrawing = (id) => {
     const dwg = drawings.find(d => d.id === id);
+    if (dwg) {
+      if (dwg.pdfData) deleteBlobUrl(dwg.pdfData);
+      (dwg.versions || []).forEach(v => {
+        if (v.pdfData) deleteBlobUrl(v.pdfData);
+      });
+      addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
+    }
     setDrawings(prev => prev.filter(d => d.id !== id));
-    if (dwg) addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
   };
 
   const uploadCRS = (drawingId, crsData) => {
@@ -466,8 +486,11 @@ export function AppProvider({ children }) {
 
   const deleteProposal = (id) => {
     const p = proposals.find(x => x.id === id);
+    if (p) {
+      if (p.fileData) deleteBlobUrl(p.fileData);
+      addLog(`Proposal <strong>${p.title}</strong> deleted.`);
+    }
     setProposals(prev => prev.filter(x => x.id !== id));
-    if (p) addLog(`Proposal <strong>${p.title}</strong> deleted.`);
   };
 
   return (

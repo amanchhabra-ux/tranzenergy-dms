@@ -25,24 +25,38 @@ export function ProposalsView() {
     }
   }, [activeProposalId, activeProposal?.followUpComments]);
 
+  const [uploading, setUploading] = useState(false);
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setFileData(ev.target.result);
-    };
-    reader.readAsDataURL(file);
+    setFileData(file); // store raw file instead of base64
   };
 
-  const handleSaveProposal = () => {
+  const handleSaveProposal = async () => {
     if (!newProposal.title || !fileData) return alert('Please provide a title and attach a file.');
-    uploadProposal({ ...newProposal, fileData, fileName, followUpComments: '' });
-    setShowUploadModal(false);
-    setNewProposal({ title: '', submissionDate: '', followUpDate: '' });
-    setFileData(null);
-    setFileName('');
+    setUploading(true);
+
+    try {
+      const response = await fetch(`/api/upload?filename=${encodeURIComponent(fileName)}`, {
+        method: 'POST',
+        body: fileData,
+      });
+      if (!response.ok) throw new Error('Upload failed');
+      const blob = await response.json();
+      
+      uploadProposal({ ...newProposal, fileData: blob.url, fileName, followUpComments: '' });
+      setShowUploadModal(false);
+      setNewProposal({ title: '', submissionDate: '', followUpDate: '' });
+      setFileData(null);
+      setFileName('');
+    } catch (err) {
+      console.error(err);
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDelete = (e, id) => {
@@ -230,7 +244,9 @@ export function ProposalsView() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setShowUploadModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveProposal}>Save Proposal</button>
+              <button className="btn btn-primary" onClick={handleSaveProposal} disabled={uploading}>
+                {uploading ? 'Uploading...' : 'Save Proposal'}
+              </button>
             </div>
           </div>
         </div>
