@@ -136,18 +136,26 @@ export function ProposalsView() {
             </div>
             
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* PDF Viewer / File Placeholder */}
-              <div style={{ flex: 2, borderRight: '1px solid var(--border)', background: '#111827', position: 'relative' }}>
-                {activeProposal.fileData?.startsWith('data:application/pdf') ? (
-                  <PdfViewer pdfDataUrl={activeProposal.fileData} />
+              {/* PDF Viewer */}
+              <div style={{ flex: 2, borderRight: '1px solid var(--border)', background: '#111827', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {activeProposal.fileData ? (
+                  activeProposal.fileData.startsWith('http') || activeProposal.fileData.startsWith('data:application/pdf') ? (
+                    <PdfViewer pdfDataUrl={activeProposal.fileData} />
+                  ) : (
+                    <div className="empty-state" style={{ height: '100%' }}>
+                      <div className="empty-state-icon">📎</div>
+                      <div className="empty-state-title">Attached File</div>
+                      <div className="empty-state-desc">{activeProposal.fileName || 'Non-PDF file format'}</div>
+                      <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={handleDownload}>
+                        Download to View
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <div className="empty-state" style={{ height: '100%' }}>
                     <div className="empty-state-icon">📎</div>
-                    <div className="empty-state-title">Attached File</div>
-                    <div className="empty-state-desc">{activeProposal.fileName || 'Non-PDF file format'}</div>
-                    <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={handleDownload}>
-                      Download to View
-                    </button>
+                    <div className="empty-state-title">No File Attached</div>
+                    <div className="empty-state-desc">No file was uploaded with this proposal.</div>
                   </div>
                 )}
               </div>
