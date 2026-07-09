@@ -138,9 +138,27 @@ export function AppProvider({ children }) {
   };
 
   const deleteProject = (id) => {
-    const p = projects.find(x => x.id === id);
-    setProjects(prev => prev.filter(x => x.id !== id));
-    setDrawings(prev => prev.filter(d => d.projectId !== id));
+    setDrawings(prev => {
+      const projDrawings = prev.filter(d => d.projectId === id);
+      const otherDrawings = prev.filter(d => d.projectId !== id);
+      
+      projDrawings.forEach(dwg => {
+        const checkAndDelete = (url) => {
+          if (!url) return;
+          let inUse = false;
+          for (const d of otherDrawings) {
+            if (d.pdfData === url) inUse = true;
+            if (d.versions) d.versions.forEach(v => { if (v.pdfData === url) inUse = true; });
+          }
+          if (!inUse) deleteBlobUrl(url);
+        };
+        
+        checkAndDelete(dwg.pdfData);
+        (dwg.versions || []).forEach(v => checkAndDelete(v.pdfData));
+      });
+      return otherDrawings;
+    });
+    setProjects(prev => prev.filter(p => p.id !== id));
     addLog(`Project and its drawings deleted.`);
   };
 
@@ -199,15 +217,27 @@ export function AppProvider({ children }) {
   };
 
   const deleteDrawing = (id) => {
-    const dwg = drawings.find(d => d.id === id);
-    if (dwg) {
-      if (dwg.pdfData) deleteBlobUrl(dwg.pdfData);
-      (dwg.versions || []).forEach(v => {
-        if (v.pdfData) deleteBlobUrl(v.pdfData);
-      });
-      addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
-    }
-    setDrawings(prev => prev.filter(d => d.id !== id));
+    setDrawings(prev => {
+      const dwg = prev.find(d => d.id === id);
+      if (dwg) {
+        const checkAndDelete = (url) => {
+          if (!url) return;
+          let inUse = false;
+          // Check if any OTHER drawing uses this URL
+          for (const d of prev) {
+            if (d.id === id) continue;
+            if (d.pdfData === url) inUse = true;
+            if (d.versions) d.versions.forEach(v => { if (v.pdfData === url) inUse = true; });
+          }
+          if (!inUse) deleteBlobUrl(url);
+        };
+        
+        checkAndDelete(dwg.pdfData);
+        (dwg.versions || []).forEach(v => checkAndDelete(v.pdfData));
+        addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
+      }
+      return prev.filter(d => d.id !== id);
+    });
   };
 
   const uploadCRS = (drawingId, crsData) => {
