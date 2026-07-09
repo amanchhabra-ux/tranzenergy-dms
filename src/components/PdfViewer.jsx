@@ -124,8 +124,10 @@ export function PdfViewer({ pdfDataUrl, pins = [], onCanvasClick, activePinId, s
           const bytes = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
           src = { data: bytes };
+        } else if (typeof pdfDataUrl === 'string') {
+          src = { url: pdfDataUrl };
         } else {
-          src = pdfDataUrl; // URL string or already an object
+          src = pdfDataUrl; // already an object
         }
 
         const pdfDoc = await pdfjsLib.getDocument(src).promise;
