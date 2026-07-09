@@ -16,148 +16,8 @@ const SEED_USERS = [
   { id: 'u10',name: 'Ritu Agarwal',   email: 'ritu@tranzenergy.in',   role: 'Viewer',           avatar: 'RA', color: '#a78bfa' },
 ];
 
-const SEED_PROJECTS = [
-  {
-    id: 'p1',
-    code: 'BGTPS-TL-2024',
-    name: 'BGTPS 400kV Transmission Line',
-    client: 'NTPC Limited',
-    clientContact: 'Er. A. Krishnamurthy',
-    type: 'transmission',
-    location: 'Jharkhand, India',
-    startDate: '2024-03-01',
-    status: 'active',
-    description: '400kV double circuit transmission line, 82km, with 4 substations and river crossings.',
-    assignedUsers: ['u1', 'u2', 'u3'],
-  },
-  {
-    id: 'p2',
-    code: 'RJSOL-50MW-2024',
-    name: 'Rajasthan 50MW Solar Plant',
-    client: 'ReNew Power Pvt. Ltd.',
-    clientContact: 'Ms. Sheela Verma',
-    type: 'solar',
-    location: 'Jodhpur, Rajasthan',
-    startDate: '2024-06-15',
-    status: 'active',
-    description: '50MW DC, 40MW AC ground-mounted solar PV plant with 33kV interconnection.',
-    assignedUsers: ['u1', 'u2'],
-  },
-  {
-    id: 'p3',
-    code: 'PBBESS-20MW-2024',
-    name: 'Punjab BESS 20MW/80MWh',
-    client: 'Adani Green Energy',
-    clientContact: 'Mr. Rohit Jain',
-    type: 'bess',
-    location: 'Ludhiana, Punjab',
-    startDate: '2024-09-01',
-    status: 'active',
-    description: 'Battery Energy Storage System, 20MW / 80MWh, grid-scale with BMS & EMS.',
-    assignedUsers: ['u1', 'u3'],
-  },
-  {
-    id: 'p4',
-    code: 'GUWIND-100MW-2025',
-    name: 'Gujarat 100MW Wind Farm',
-    client: 'Suzlon Energy Ltd.',
-    clientContact: 'Er. Kiran Patel',
-    type: 'wind',
-    location: 'Kutch, Gujarat',
-    startDate: '2025-01-10',
-    status: 'active',
-    description: '100MW onshore wind farm with 25 turbines, 33kV collector network and substation.',
-    assignedUsers: ['u1'],
-  },
-];
-
-const SEED_DRAWINGS = [
-  // ── BGTPS-TL-2024
-  {
-    id: 'dwg-1', code: 'BGTPS-TL-E-SLD-001', title: 'Single Line Diagram — 400kV Substation A',
-    discipline: 'Electrical', subType: 'SLD',
-    projectId: 'p1', status: 'AFC', currentVersion: 'R2',
-    description: 'SLD for the 400kV Substation A with bus-bar arrangement, transformer and protection.',
-    versions: [
-      { version: 'R2', date: '2024-08-10 14:20', author: 'Arun Verma', changeSummary: 'Bus-coupler added per client review comment #12.', pdfData: null },
-      { version: 'R1', date: '2024-07-22 10:05', author: 'Arun Verma', changeSummary: 'Protection relay coordination updated. CT ratios revised.', pdfData: null },
-      { version: 'R0', date: '2024-06-15 09:00', author: 'Sunita Rao', changeSummary: 'Initial issue for client review.', pdfData: null },
-    ],
-    pins: [
-      { id: 'pin-1', x: 35, y: 40, page: 1, label: 1, resolved: true,
-        comments: [
-          { id: 'c1', author: 'Arun Verma', text: 'CT ratio on 400kV side to be confirmed with NTPC.', date: '2024-06-20 11:00', type: 'internal' },
-          { id: 'c2', author: 'Raj Sharma', text: 'Confirmed 2000/1A as per NTPC standard.', date: '2024-06-21 09:30', type: 'internal' },
-        ]
-      },
-    ]
-  },
-  {
-    id: 'dwg-2', code: 'BGTPS-TL-C-LAY-001', title: 'Tower Foundation Layout — Type 1A',
-    discipline: 'Civil', subType: 'Foundation',
-    projectId: 'p1', status: 'IFA', currentVersion: 'R1',
-    description: 'Foundation layout and reinforcement details for suspension tower Type 1A.',
-    versions: [
-      { version: 'R1', date: '2024-08-05 16:00', author: 'Vikram Nair', changeSummary: 'Reinforcement bars updated per soil report revision.', pdfData: null },
-      { version: 'R0', date: '2024-07-01 11:30', author: 'Vikram Nair', changeSummary: 'Initial issue.', pdfData: null },
-    ],
-    pins: []
-  },
-  {
-    id: 'dwg-3', code: 'BGTPS-TL-S-SCADA-001', title: 'SCADA Architecture Diagram',
-    discipline: 'SCADA & Telecom', subType: 'Architecture',
-    projectId: 'p1', status: 'IFA', currentVersion: 'R0',
-    description: 'Overall SCADA system architecture for remote monitoring and control.',
-    versions: [
-      { version: 'R0', date: '2024-09-01 09:00', author: 'Manoj Kumar', changeSummary: 'Initial issue for internal review.', pdfData: null },
-    ],
-    pins: []
-  },
-  // ── RJSOL-50MW-2024
-  {
-    id: 'dwg-4', code: 'RJSOL-E-SLD-001', title: 'Solar Plant Single Line Diagram — 33kV',
-    discipline: 'Electrical', subType: 'SLD',
-    projectId: 'p2', status: 'AFC', currentVersion: 'R1',
-    description: 'Main SLD for 50MW solar plant including inverter stations and 33kV grid connection.',
-    versions: [
-      { version: 'R1', date: '2024-09-12 10:00', author: 'Sunita Rao', changeSummary: 'PV string configuration revised from 24 to 28 strings.', pdfData: null },
-      { version: 'R0', date: '2024-08-01 08:30', author: 'Sunita Rao', changeSummary: 'Initial issue.', pdfData: null },
-    ],
-    pins: []
-  },
-  {
-    id: 'dwg-5', code: 'RJSOL-C-LAY-001', title: 'Site Layout — Module & Inverter Arrangement',
-    discipline: 'Civil', subType: 'Layout',
-    projectId: 'p2', status: 'IFA', currentVersion: 'R0',
-    description: 'Detailed site layout showing PV module rows, inverter stations, and cable trenches.',
-    versions: [
-      { version: 'R0', date: '2024-08-20 14:00', author: 'Deepa Singh', changeSummary: 'Initial issue for client approval.', pdfData: null },
-    ],
-    pins: []
-  },
-  // ── PBBESS-20MW-2024
-  {
-    id: 'dwg-6', code: 'PBBESS-E-SLD-001', title: 'BESS Single Line Diagram — 20MW Grid Tie',
-    discipline: 'Electrical', subType: 'SLD',
-    projectId: 'p3', status: 'IFA', currentVersion: 'R0',
-    description: 'SLD for 20MW BESS grid tie with PCS, transformer and protection relay schematic.',
-    versions: [
-      { version: 'R0', date: '2024-10-05 09:00', author: 'Arun Verma', changeSummary: 'Initial issue for review.', pdfData: null },
-    ],
-    pins: []
-  },
-  // ── GUWIND-100MW-2025
-  {
-    id: 'dwg-7', code: 'GUWIND-E-SLD-001', title: 'Wind Farm Collector Network SLD',
-    discipline: 'Electrical', subType: 'SLD',
-    projectId: 'p4', status: 'IFA', currentVersion: 'R0',
-    description: '33kV collector network SLD for 25 turbines in 5 feeders.',
-    versions: [
-      { version: 'R0', date: '2025-01-20 10:00', author: 'Suresh B.', changeSummary: 'Initial issue.', pdfData: null },
-    ],
-    pins: []
-  },
-];
+const SEED_PROJECTS = [];
+const SEED_DRAWINGS = [];
 
 const DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural'];
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
@@ -165,7 +25,7 @@ const STATUSES = ['IFA', 'AFC', 'Superseded'];
 const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
 const SEED_PROPOSALS = [];
 
-const STORAGE_KEY = 'tranzenergy_v2';
+const STORAGE_KEY = 'tranzenergy_v3';
 
 function loadState() {
   try {
