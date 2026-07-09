@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof -i :5173 -sTCP:LISTEN -n -P)",
+      "Bash(npx oxlint *)",
+      "Bash(curl -sI http://127.0.0.1:8899/test_mdl_upload.xlsx)",
+      "Bash(pkill -f cors_server.py)"
+    ]
+  }
+}
