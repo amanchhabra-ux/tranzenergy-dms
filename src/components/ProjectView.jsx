@@ -4,6 +4,7 @@ import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
 import { Plus, Search, Upload, X, FileCheck2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { upload } from '@vercel/blob/client';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.mjs',
@@ -443,12 +444,10 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       setParseMsg('⏳ Uploading file to Vercel Storage...');
       setUploading(true);
       try {
-        const response = await fetch(`/api/upload?filename=${encodeURIComponent(pdfFile.name)}`, {
-          method: 'POST',
-          body: pdfFile, // send raw file
+        const blob = await upload(pdfFile.name, pdfFile, {
+          access: 'public',
+          handleUploadUrl: '/api/upload',
         });
-        if (!response.ok) throw new Error('Upload failed');
-        const blob = await response.json();
         uploadedUrl = blob.url;
       } catch (err) {
         console.error(err);

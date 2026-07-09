@@ -2,6 +2,7 @@ import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../AppContext';
 import { FileText, Plus, X, Upload, Calendar, Trash2, Download } from 'lucide-react';
 import { PdfViewer } from './PdfViewer';
+import { upload } from '@vercel/blob/client';
 
 export function ProposalsView() {
   const { proposals, uploadProposal, updateProposalComments, deleteProposal } = useContext(AppContext);
@@ -39,12 +40,10 @@ export function ProposalsView() {
     setUploading(true);
 
     try {
-      const response = await fetch(`/api/upload?filename=${encodeURIComponent(fileName)}`, {
-        method: 'POST',
-        body: fileData,
+      const blob = await upload(fileName, fileData, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
       });
-      if (!response.ok) throw new Error('Upload failed');
-      const blob = await response.json();
       
       uploadProposal({ ...newProposal, fileData: blob.url, fileName, followUpComments: '' });
       setShowUploadModal(false);

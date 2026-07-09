@@ -4,6 +4,7 @@ import { PdfViewer } from './PdfViewer';
 import { ExcelViewer } from './ExcelViewer';
 import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { upload } from '@vercel/blob/client';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.mjs',
@@ -504,12 +505,10 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
     setUploading(true);
 
     try {
-      const response = await fetch(`/api/upload?filename=${encodeURIComponent(pdfFile.name)}`, {
-        method: 'POST',
-        body: pdfFile,
+      const blob = await upload(pdfFile.name, pdfFile, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
       });
-      if (!response.ok) throw new Error('Upload failed');
-      const blob = await response.json();
       
       uploadRevision(drawing.id, summary, blob.url, status);
       setUploading(false);
