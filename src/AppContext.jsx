@@ -4,7 +4,11 @@ export const AppContext = createContext(null);
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
-  { id: 'u1', name: 'Aman Chhabra',   email: 'aman@tranzenergy.in',   role: 'Admin',           avatar: 'AC', color: '#6366f1' },
+  { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#6366f1' },
+  { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#06b6d4' },
+  { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#10b981' },
+  { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#f59e0b' },
+  { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#94a3b8' },
 ];
 
 const SEED_PROJECTS = [];
@@ -16,7 +20,7 @@ const STATUSES = ['IFA', 'AFC', 'Superseded'];
 const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
 const SEED_PROPOSALS = [];
 
-const STORAGE_KEY = 'tranzenergy_v4';
+const STORAGE_KEY = 'tranzenergy_v5';
 
 function loadState() {
   try {
