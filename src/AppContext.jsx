@@ -4,7 +4,7 @@ export const AppContext = createContext(null);
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
-  { id: 'u1', name: 'Raj Sharma',     email: 'raj@tranzenergy.in',    role: 'Admin',           avatar: 'RS', color: '#6366f1' },
+  { id: 'u1', name: 'Aman Chhabra',   email: 'aman@tranzenergy.in',   role: 'Admin',           avatar: 'AC', color: '#6366f1' },
   { id: 'u2', name: 'Priya Mehta',    email: 'priya@tranzenergy.in',  role: 'Project Manager',  avatar: 'PM', color: '#06b6d4' },
   { id: 'u3', name: 'Arun Verma',     email: 'arun@tranzenergy.in',   role: 'Senior Engineer',  avatar: 'AV', color: '#10b981' },
   { id: 'u4', name: 'Sunita Rao',     email: 'sunita@tranzenergy.in', role: 'Engineer',         avatar: 'SR', color: '#f59e0b' },
