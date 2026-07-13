@@ -40,9 +40,12 @@ export function ProposalsView() {
     setUploading(true);
 
     try {
-      const blob = await upload(fileName, fileData, {
+      const safeName = (newProposal.title || 'proposal').trim().replace(/\s+/g, '_').toUpperCase();
+      const blobPath = `proposals/${safeName}/${fileName}`;
+      const blob = await upload(blobPath, fileData, {
         access: 'public',
         handleUploadUrl: '/api/upload',
+        addRandomSuffix: false,
       });
       
       uploadProposal({ ...newProposal, fileData: blob.url, fileName, followUpComments: '' });

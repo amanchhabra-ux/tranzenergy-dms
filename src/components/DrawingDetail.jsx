@@ -505,9 +505,11 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
     setUploading(true);
 
     try {
-      const blob = await upload(pdfFile.name, pdfFile, {
+      const blobPath = `drawings/${drawing.code.trim().toUpperCase()}/${pdfFile.name}`;
+      const blob = await upload(blobPath, pdfFile, {
         access: 'public',
         handleUploadUrl: '/api/upload',
+        addRandomSuffix: false,
       });
       
       uploadRevision(drawing.id, summary, blob.url, status);

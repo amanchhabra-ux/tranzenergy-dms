@@ -443,9 +443,11 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       setParseMsg('⏳ Uploading file to Vercel Storage...');
       setUploading(true);
       try {
-        const blob = await upload(pdfFile.name, pdfFile, {
+        const blobPath = `drawings/${code.trim().toUpperCase()}/${pdfFile.name}`;
+        const blob = await upload(blobPath, pdfFile, {
           access: 'public',
           handleUploadUrl: '/api/upload',
+          addRandomSuffix: false,
         });
         uploadedUrl = blob.url;
       } catch (err) {
