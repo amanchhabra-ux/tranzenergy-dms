@@ -166,15 +166,6 @@ export function AppProvider({ children }) {
   }, [drawings]);
 
   const createDrawing = (data) => {
-    const existing = drawings.find(
-      d => d.code.toUpperCase() === (data.code || '').toUpperCase().trim() && d.projectId === data.projectId
-    );
-
-    if (existing) {
-      // Append revision instead
-      uploadRevision(existing.id, data.changeSummary || 'Revision uploaded', data.pdfData || null);
-      return existing;
-    }
 
     const startVer = data.initialVersion || 'R0';
     const dwg = {
