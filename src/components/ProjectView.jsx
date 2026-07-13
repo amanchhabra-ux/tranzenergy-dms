@@ -447,7 +447,6 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
         const blob = await upload(blobPath, pdfFile, {
           access: 'public',
           handleUploadUrl: '/api/upload',
-          addRandomSuffix: false,
         });
         uploadedUrl = blob.url;
       } catch (err) {

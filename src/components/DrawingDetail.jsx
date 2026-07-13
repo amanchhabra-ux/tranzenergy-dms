@@ -509,7 +509,6 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
       const blob = await upload(blobPath, pdfFile, {
         access: 'public',
         handleUploadUrl: '/api/upload',
-        addRandomSuffix: false,
       });
       
       uploadRevision(drawing.id, summary, blob.url, status);

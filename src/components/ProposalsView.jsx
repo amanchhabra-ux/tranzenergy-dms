@@ -45,7 +45,6 @@ export function ProposalsView() {
       const blob = await upload(blobPath, fileData, {
         access: 'public',
         handleUploadUrl: '/api/upload',
-        addRandomSuffix: false,
       });
       
       uploadProposal({ ...newProposal, fileData: blob.url, fileName, followUpComments: '' });
