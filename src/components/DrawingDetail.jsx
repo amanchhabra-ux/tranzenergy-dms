@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
 import { ExcelViewer } from './ExcelViewer';
-import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet } from 'lucide-react';
+import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { upload } from '@vercel/blob/client';
 
@@ -18,8 +18,17 @@ const STATUS_MAP = {
   Superseded: { label: 'Superseded',     cls: 'badge-superseded', icon: X },
 };
 
+const DISCIPLINE_COLORS = {
+  'Electrical':          '#6366f1',
+  'Civil':               '#f59e0b',
+  'Mechanical':          '#10b981',
+  'SCADA & Telecom':     '#06b6d4',
+  'Protection & Control':'#8b5cf6',
+  'Structural':          '#ec4899',
+};
+
 export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
-  const { drawings, currentUser, canDo, uploadRevision, setDrawingStatus, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, STATUSES } = useContext(AppContext);
+  const { drawings, currentUser, canDo, uploadRevision, setDrawingStatus, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, STATUSES, DISCIPLINES, moveDrawingToDiscipline } = useContext(AppContext);
 
   const drawing = drawings.find(d => d.id === drawingId);
 
@@ -32,6 +41,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
   const [commentType, setCommentType] = useState('internal');
   const [newPinId, setNewPinId] = useState(null);
   const [activeView, setActiveView] = useState('pdf');
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
 
@@ -149,7 +159,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           </div>
         </div>
 
-        <div className="drawing-header-meta">
+        <div className="drawing-header-meta" style={{ position: 'relative' }}>
           {canDo('upload') && (
             <>
               <button className="btn btn-ghost btn-sm btn-icon" title={showComments ? 'Hide comments' : 'Show comments'} onClick={() => setShowComments(s => !s)} style={{ color: showComments ? 'var(--primary-light)' : undefined }}>
@@ -165,6 +175,48 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                 <FileSpreadsheet size={16} />
               </button>
               <input type="file" ref={crsInputRef} accept=".xlsx, .xls" style={{ display: 'none' }} onChange={handleCrsUpload} />
+              <button 
+                className="btn btn-ghost btn-sm btn-icon" 
+                title="Move to category" 
+                onClick={() => setShowMoveMenu(s => !s)}
+                style={{ color: showMoveMenu ? 'var(--primary-light)' : undefined }}
+              >
+                <FolderInput size={16} />
+              </button>
+              {showMoveMenu && (
+                <div
+                  style={{
+                    position: 'absolute', right: 0, top: '100%', zIndex: 50, marginTop: '8px',
+                    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                    borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                    minWidth: '180px', overflow: 'hidden',
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                    Move to category
+                  </div>
+                  {DISCIPLINES.filter(d => d !== drawing.discipline).map(d => (
+                    <button
+                      key={d}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '8px 14px', background: 'none', border: 'none',
+                        color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
+                      onMouseLeave={e => e.target.style.background = 'none'}
+                      onClick={() => {
+                        moveDrawingToDiscipline(drawing.id, d);
+                        setShowMoveMenu(false);
+                      }}
+                    >
+                      <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#6366f1', marginRight: 8 }} />
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 className="btn btn-ghost btn-sm btn-icon"
                 style={{ color: 'var(--error)' }}
