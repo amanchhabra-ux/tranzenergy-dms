@@ -172,7 +172,8 @@ export function AppProvider({ children }) {
 
     if (existing) {
       // Append revision instead
-      return uploadRevision(existing.id, data.changeSummary || 'Revision uploaded', data.pdfData || null);
+      uploadRevision(existing.id, data.changeSummary || 'Revision uploaded', data.pdfData || null);
+      return existing;
     }
 
     const startVer = data.initialVersion || 'R0';
