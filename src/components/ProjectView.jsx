@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
-import { Plus, Search, Upload, X, FileCheck2 } from 'lucide-react';
+import { Plus, Search, Upload, X, FileCheck2, FolderInput } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { upload } from '@vercel/blob/client';
 
@@ -28,7 +28,7 @@ const STATUS_COLORS = {
 };
 
 export function ProjectView({ projectId, onBack }) {
-  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, canDo } = useContext(AppContext);
+  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, canDo, moveDrawingToDiscipline, addDiscipline } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -38,6 +38,9 @@ export function ProjectView({ projectId, onBack }) {
   const [activeDrawingId, setActiveDrawingId] = useState(projectDrawings[0]?.id || null);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [movingDrawingId, setMovingDrawingId] = useState(null);
 
   if (!project) {
     return (
@@ -47,14 +50,10 @@ export function ProjectView({ projectId, onBack }) {
     );
   }
 
-  // Discipline tabs
+  // Discipline tabs — always include all DISCIPLINES plus MDL
   const disciplineTabs = [
     { key: 'all', label: 'All Drawings' },
-    { key: 'Electrical', label: 'Electrical' },
-    { key: 'Civil', label: 'Civil' },
-    { key: 'Mechanical', label: 'Mechanical' },
-    { key: 'SCADA & Telecom', label: 'SCADA' },
-    { key: 'Protection & Control', label: 'Protection' },
+    ...DISCIPLINES.map(d => ({ key: d, label: d })),
     { key: 'mdl', label: 'MDL' },
   ];
 
@@ -69,6 +68,14 @@ export function ProjectView({ projectId, onBack }) {
     if (key === 'all') return projectDrawings.length;
     if (key === 'mdl') return null;
     return projectDrawings.filter(d => d.discipline === key).length;
+  };
+
+  const handleAddCategory = () => {
+    if (!newCategoryName.trim()) return;
+    addDiscipline(newCategoryName.trim());
+    setActiveTab(newCategoryName.trim());
+    setNewCategoryName('');
+    setShowAddCategoryModal(false);
   };
 
   return (
@@ -99,7 +106,7 @@ export function ProjectView({ projectId, onBack }) {
       </div>
 
       {/* Discipline tabs */}
-      <div className="tab-bar">
+      <div className="tab-bar" style={{ display: 'flex', alignItems: 'center' }}>
         {disciplineTabs.map(tab => {
           const count = tabCount(tab.key);
           return (
@@ -121,6 +128,16 @@ export function ProjectView({ projectId, onBack }) {
             </div>
           );
         })}
+        {canDo('upload') && (
+          <button
+            className="btn btn-ghost btn-sm btn-icon"
+            title="Add new category"
+            onClick={() => setShowAddCategoryModal(true)}
+            style={{ marginLeft: '4px', color: 'var(--text-muted)', flexShrink: 0 }}
+          >
+            <Plus size={14} />
+          </button>
+        )}
       </div>
 
       {/* Main workspace */}
@@ -159,7 +176,8 @@ export function ProjectView({ projectId, onBack }) {
                   <div
                     key={dwg.id}
                     className={`drawing-item ${activeDrawingId === dwg.id ? 'active' : ''}`}
-                    onClick={() => setActiveDrawingId(dwg.id)}
+                    style={{ position: 'relative' }}
+                    onClick={() => { setActiveDrawingId(dwg.id); setMovingDrawingId(null); }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="drawing-item-code">{dwg.code}</div>
@@ -171,13 +189,60 @@ export function ProjectView({ projectId, onBack }) {
                         </span>
                       </div>
                     </div>
-                    <div
-                      style={{
-                        width: 3, height: '100%', borderRadius: 2, flexShrink: 0, minHeight: 36,
-                        background: DISCIPLINE_COLORS[dwg.discipline] || '#6366f1',
-                        opacity: 0.7
-                      }}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                      <div
+                        style={{
+                          width: 3, height: 36, borderRadius: 2,
+                          background: DISCIPLINE_COLORS[dwg.discipline] || '#6366f1',
+                          opacity: 0.7
+                        }}
+                      />
+                      {canDo('upload') && (
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          title="Move to category"
+                          style={{ padding: '2px', opacity: 0.5, width: '20px', height: '20px' }}
+                          onClick={(e) => { e.stopPropagation(); setMovingDrawingId(movingDrawingId === dwg.id ? null : dwg.id); }}
+                        >
+                          <FolderInput size={11} />
+                        </button>
+                      )}
+                    </div>
+                    {/* Move to dropdown */}
+                    {movingDrawingId === dwg.id && (
+                      <div
+                        style={{
+                          position: 'absolute', right: 0, top: '100%', zIndex: 50,
+                          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                          borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                          minWidth: '180px', overflow: 'hidden',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                          Move to category
+                        </div>
+                        {DISCIPLINES.filter(d => d !== dwg.discipline).map(d => (
+                          <button
+                            key={d}
+                            style={{
+                              display: 'block', width: '100%', textAlign: 'left',
+                              padding: '8px 14px', background: 'none', border: 'none',
+                              color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer',
+                            }}
+                            onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
+                            onMouseLeave={e => e.target.style.background = 'none'}
+                            onClick={() => {
+                              moveDrawingToDiscipline(dwg.id, d);
+                              setMovingDrawingId(null);
+                            }}
+                          >
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#6366f1', marginRight: 8 }} />
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -204,6 +269,33 @@ export function ProjectView({ projectId, onBack }) {
           onCreated={(id) => { setActiveDrawingId(id); setActiveTab('all'); setShowRegisterModal(false); }}
           createDrawing={createDrawing}
         />
+      )}
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '360px' }}>
+            <div className="modal-header">
+              <h2>Add New Category</h2>
+              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddCategoryModal(false)}><X size={16} /></button>
+            </div>
+            <div className="modal-body">
+              <label className="form-label">Category Name</label>
+              <input
+                className="form-input"
+                placeholder="e.g. Instrumentation, HVAC..."
+                value={newCategoryName}
+                onChange={e => setNewCategoryName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowAddCategoryModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleAddCategory} disabled={!newCategoryName.trim()}>Add Category</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -14,7 +14,7 @@ const SEED_USERS = [
 const SEED_PROJECTS = [];
 const SEED_DRAWINGS = [];
 
-const DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural'];
+const DEFAULT_DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural'];
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
 const STATUSES = ['IFA', 'AFC', 'Superseded'];
 const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
@@ -86,12 +86,13 @@ export function AppProvider({ children }) {
   const [drawings,    setDrawings]    = useState(saved?.drawings    || SEED_DRAWINGS);
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
+  const [disciplines, setDisciplines] = useState(saved?.disciplines || DEFAULT_DISCIPLINES);
 
   // Persist on change
   useEffect(() => {
     if (!currentUser) return;
-    saveState({ currentUser, users, projects, drawings, proposals, activityLog });
-  }, [currentUser, users, projects, drawings, proposals, activityLog]);
+    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines });
+  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines]);
 
   // ─── Activity Log ──────────────────────────────────────────────────────────
   const addLog = useCallback((message, authorName) => {
@@ -206,6 +207,21 @@ export function AppProvider({ children }) {
 
   const updateDrawing = (id, updates) => {
     setDrawings(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+  };
+
+  const moveDrawingToDiscipline = (drawingId, newDiscipline) => {
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      addLog(`Drawing <strong>${d.code}</strong> moved to <strong>${newDiscipline}</strong>.`);
+      return { ...d, discipline: newDiscipline };
+    }));
+  };
+
+  const addDiscipline = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setDisciplines(prev => prev.includes(trimmed) ? prev : [...prev, trimmed]);
+    addLog(`Category <strong>${trimmed}</strong> added.`);
   };
 
   const deleteDrawing = (id) => {
@@ -360,7 +376,7 @@ export function AppProvider({ children }) {
       // State
       currentUser, users, projects, drawings, proposals, activityLog,
       // Consts
-      DISCIPLINES, PROJECT_TYPES, STATUSES, ROLES,
+      DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth
       login, logout,
       // Permissions
@@ -369,11 +385,14 @@ export function AppProvider({ children }) {
       createProject, updateProject, deleteProject, assignUsersToProject,
       // Drawings
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
+      moveDrawingToDiscipline,
       uploadRevision, setDrawingStatus, uploadCRS,
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Users
       createUser, updateUser, deleteUser,
+      // Disciplines
+      addDiscipline,
       // Proposals
       uploadProposal, updateProposalComments, deleteProposal,
       // Log
