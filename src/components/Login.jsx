@@ -7,19 +7,18 @@ export function Login() {
   const [selectedAdmin, setSelectedAdmin] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
+  const [email, setEmail] = useState('');
+  const [loginError, setLoginError] = useState('');
 
-  const roleColor = (role) => {
-    switch (role) {
-      case 'Admin':           return '#6366f1';
-      case 'Project Manager': return '#06b6d4';
-      case 'Senior Engineer': return '#10b981';
-      case 'Engineer':        return '#f59e0b';
-      case 'Viewer':          return '#94a3b8';
-      default:                return '#6366f1';
+  const handleEmailSubmit = (e) => {
+    e.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = users.find(u => u.email?.toLowerCase().trim() === normalizedEmail);
+    if (!user) {
+      setLoginError('Invalid email address. Please try again.');
+      return;
     }
-  };
-
-  const handleLoginClick = (user) => {
+    setLoginError('');
     if (user.role === 'Admin') {
       setSelectedAdmin(user);
       setPassword('');
@@ -61,31 +60,31 @@ export function Login() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
-          Select a profile to enter the workspace
+          Enter your email to access the workspace
         </p>
 
-        <div className="login-demo-grid-modern">
-          {users.map(u => (
-            <button
-              key={u.id}
-              className="demo-card-modern"
-              onClick={() => handleLoginClick(u)}
-            >
-              <div
-                className="demo-card-avatar"
-                style={{ background: u.color || '#6366f1' }}
-              >
-                {u.avatar}
-              </div>
-              <div className="demo-card-info">
-                <span className="demo-card-name">{u.name}</span>
-                <span className="demo-card-role" style={{ color: roleColor(u.role) }}>
-                  {u.role} {u.role === 'Admin' && <Lock size={10} style={{ display: 'inline', marginLeft: '4px' }} />}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
+        <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" style={{ color: 'var(--text-secondary)' }}>Email Address</label>
+            <input
+              type="email"
+              className="form-input"
+              style={{ width: '100%' }}
+              placeholder="e.g. pm@tranzenergy.in or viewer@tranzenergy.in"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          {loginError && (
+            <div style={{ color: 'var(--error)', fontSize: '12px', textAlign: 'center' }}>
+              {loginError}
+            </div>
+          )}
+          <button type="submit" className="btn btn-primary" style={{ justifyContent: 'center', width: '100%', padding: '10px' }}>
+            Sign In
+          </button>
+        </form>
 
         {/* Sectors Supported */}
         <div style={{ marginTop: '36px', textAlign: 'center' }}>

@@ -86,7 +86,7 @@ export function Dashboard({ onOpenProject }) {
           })}
         </div>
 
-        <div className="dashboard-grid">
+        <div className="dashboard-grid" style={{ gridTemplateColumns: currentUser.role === 'Admin' ? '1fr 360px' : '1fr' }}>
           {/* Projects */}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
@@ -136,33 +136,35 @@ export function Dashboard({ onOpenProject }) {
           </div>
 
           {/* Activity feed */}
-          <div>
-            <div style={{ marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '15px' }}>Recent Activity</h3>
-            </div>
-            <div className="card card-p-sm">
-              <div className="activity-feed">
-                {activityLog.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    No recent activity.
-                  </div>
-                ) : activityLog.slice(0, 18).map(log => (
-                  <div key={log.id} className="activity-item">
-                    <div className="activity-dot" style={{ background: 'var(--primary)' }} />
-                    <div>
-                      <div
-                        className="activity-text"
-                        dangerouslySetInnerHTML={{ __html: log.message }}
-                      />
-                      <div className="activity-time">
-                        {new Date(log.time).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}
+          {currentUser.role === 'Admin' && (
+            <div>
+              <div style={{ marginBottom: '14px' }}>
+                <h3 style={{ fontSize: '15px' }}>Recent Activity</h3>
+              </div>
+              <div className="card card-p-sm">
+                <div className="activity-feed">
+                  {activityLog.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      No recent activity.
+                    </div>
+                  ) : activityLog.slice(0, 18).map(log => (
+                    <div key={log.id} className="activity-item">
+                      <div className="activity-dot" style={{ background: 'var(--primary)' }} />
+                      <div>
+                        <div
+                          className="activity-text"
+                          dangerouslySetInnerHTML={{ __html: log.message }}
+                        />
+                        <div className="activity-time">
+                          {new Date(log.time).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
