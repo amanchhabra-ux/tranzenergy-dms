@@ -23,7 +23,7 @@ const DISCIPLINE_COLORS = {
 };
 
 export function MDLView({ projectId }) {
-  const { drawings, projects, DISCIPLINES, STATUSES, updateDrawing, deleteDrawing, uploadRevision, addLog } = useContext(AppContext);
+  const { drawings, projects, DISCIPLINES, STATUSES, updateDrawing, deleteDrawing, uploadRevision, addLog, canDo } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -267,7 +267,7 @@ export function MDLView({ projectId }) {
                   <th style={{ textAlign: 'center' }}>Revisions</th>
                   <th>Last Updated</th>
                   <th>Author</th>
-                  <th style={{ textAlign: 'right', width: '80px' }}>Actions</th>
+                  {canDo('upload') && <th style={{ textAlign: 'right', width: '80px' }}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -281,8 +281,9 @@ export function MDLView({ projectId }) {
                   return (
                     <tr
                       key={dwg.id}
-                      style={{ cursor: 'context-menu' }}
+                      style={{ cursor: canDo('upload') ? 'context-menu' : 'default' }}
                       onContextMenu={e => {
+                        if (!canDo('upload')) return;
                         e.preventDefault();
                         setContextMenu({ x: e.clientX, y: e.clientY, drawingId: dwg.id, title: dwg.title, status: dwg.status });
                       }}
@@ -317,33 +318,35 @@ export function MDLView({ projectId }) {
                       </td>
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{lastUpdate}</td>
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{lastAuthor}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                          <input
-                            ref={el => uploadRefs.current[dwg.id] = el}
-                            type="file"
-                            accept=".pdf"
-                            style={{ display: 'none' }}
-                            onChange={e => handlePdfRevision(e, dwg.id)}
-                          />
-                          <button
-                            className="btn btn-ghost btn-sm btn-icon"
-                            style={{ color: 'var(--primary-light)' }}
-                            title="Upload revision PDF"
-                            onClick={() => uploadRefs.current[dwg.id]?.click()}
-                          >
-                            <FileUp size={13} />
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm btn-icon"
-                            style={{ color: 'var(--error)' }}
-                            title="Delete drawing"
-                            onClick={() => { if (window.confirm(`Delete "${dwg.title}"?`)) deleteDrawing(dwg.id); }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
+                      {canDo('upload') && (
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                            <input
+                              ref={el => uploadRefs.current[dwg.id] = el}
+                              type="file"
+                              accept=".pdf"
+                              style={{ display: 'none' }}
+                              onChange={e => handlePdfRevision(e, dwg.id)}
+                            />
+                            <button
+                              className="btn btn-ghost btn-sm btn-icon"
+                              style={{ color: 'var(--primary-light)' }}
+                              title="Upload revision PDF"
+                              onClick={() => uploadRefs.current[dwg.id]?.click()}
+                            >
+                              <FileUp size={13} />
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm btn-icon"
+                              style={{ color: 'var(--error)' }}
+                              title="Delete drawing"
+                              onClick={() => { if (window.confirm(`Delete "${dwg.title}"?`)) deleteDrawing(dwg.id); }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

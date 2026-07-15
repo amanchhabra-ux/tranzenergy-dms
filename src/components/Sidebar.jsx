@@ -15,6 +15,8 @@ const TYPE_META = {
 export function Sidebar({ activeView, activeProjectId, onNavigate }) {
   const { currentUser, projects, drawings, canDo, logout } = useContext(AppContext);
 
+  const filteredProjects = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
+
   const drawingCount = (pid) => drawings.filter(d => d.projectId === pid).length;
 
   return (
@@ -44,7 +46,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate }) {
 
         {/* Projects */}
         <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Projects</div>
-        {projects.map(p => {
+        {filteredProjects.map(p => {
           const meta = TYPE_META[p.type] || TYPE_META.transmission;
           const Icon = meta.icon;
           const isActive = activeView === 'project' && activeProjectId === p.id;

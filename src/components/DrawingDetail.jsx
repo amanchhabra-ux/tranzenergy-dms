@@ -160,16 +160,19 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
         </div>
 
         <div className="drawing-header-meta" style={{ position: 'relative' }}>
+          {/* View-only controls available to all users who can view */}
+          <button className="btn btn-ghost btn-sm btn-icon" title={showComments ? 'Hide comments' : 'Show comments'} onClick={() => setShowComments(s => !s)} style={{ color: showComments ? 'var(--primary-light)' : undefined }}>
+            <PanelRight size={16} />
+          </button>
+          <button className="btn btn-ghost btn-sm btn-icon" title="Download" onClick={handleDownload}>
+            <Download size={16} />
+          </button>
+
+          {/* Edit/Change controls restricted to users who can modify/upload */}
           {canDo('upload') && (
             <>
-              <button className="btn btn-ghost btn-sm btn-icon" title={showComments ? 'Hide comments' : 'Show comments'} onClick={() => setShowComments(s => !s)} style={{ color: showComments ? 'var(--primary-light)' : undefined }}>
-                <PanelRight size={16} />
-              </button>
               <button className="btn btn-ghost btn-sm btn-icon" title={pinMode ? 'Cancel pin' : 'Add comment pin'} onClick={() => setPinMode(m => !m)} style={{ color: pinMode ? 'var(--warning)' : undefined }}>
                 <MessageSquare size={16} />
-              </button>
-              <button className="btn btn-ghost btn-sm btn-icon" title="Download" onClick={handleDownload}>
-                <Download size={16} />
               </button>
               <button className="btn btn-ghost btn-sm btn-icon" title="Upload CRS" onClick={() => crsInputRef.current?.click()}>
                 <FileSpreadsheet size={16} />
@@ -356,13 +359,15 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>{pin.comments.length} comment{pin.comments.length !== 1 ? 's' : ''}</span>
                     {pin.accepted && <span className="badge" style={{ background: 'var(--success)', color: '#000', fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Accepted</span>}
                     {pin.resolved && !pin.accepted && <span className="badge badge-muted" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Resolved</span>}
-                    <button
-                      onClick={e => { e.stopPropagation(); resolvePin(drawingId, pin.id); }}
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: pin.resolved || pin.accepted ? 'var(--success)' : 'var(--text-muted)', padding: '2px' }}
-                      title={pin.resolved || pin.accepted ? 'Reopen' : 'Mark resolved'}
-                    >
-                      <CheckCheck size={13} />
-                    </button>
+                    {canDo('upload') && (
+                      <button
+                        onClick={e => { e.stopPropagation(); resolvePin(drawingId, pin.id); }}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: pin.resolved || pin.accepted ? 'var(--success)' : 'var(--text-muted)', padding: '2px' }}
+                        title={pin.resolved || pin.accepted ? 'Reopen' : 'Mark resolved'}
+                      >
+                        <CheckCheck size={13} />
+                      </button>
+                    )}
                   </div>
 
                   {activePinId === pin.id && (
@@ -385,14 +390,18 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                           </div>
                         </div>
                       ))}
-                      {!(pin.resolved || pin.accepted) && (
+                      {!(pin.resolved || pin.accepted) && (canDo('approve') || canDo('upload')) && (
                         <div style={{ display: 'flex', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                          <button className="btn btn-primary btn-sm" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '6px' }} onClick={(e) => { e.stopPropagation(); acceptPin(drawingId, pin.id); }}>
-                            <CheckCircle size={14} /> Accept
-                          </button>
-                          <button className="btn btn-secondary btn-sm" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '6px' }} onClick={(e) => { e.stopPropagation(); resolvePin(drawingId, pin.id); }}>
-                            <CheckCheck size={14} /> Resolve
-                          </button>
+                          {canDo('approve') && (
+                            <button className="btn btn-primary btn-sm" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '6px' }} onClick={(e) => { e.stopPropagation(); acceptPin(drawingId, pin.id); }}>
+                              <CheckCircle size={14} /> Accept
+                            </button>
+                          )}
+                          {canDo('upload') && (
+                            <button className="btn btn-secondary btn-sm" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '6px' }} onClick={(e) => { e.stopPropagation(); resolvePin(drawingId, pin.id); }}>
+                              <CheckCheck size={14} /> Resolve
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -403,7 +412,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           </div>
 
           {/* Comment input */}
-          {activePinId && canDo('view') && (
+          {activePinId && canDo('upload') && (
             <div className="comment-input-area" style={{ flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <select

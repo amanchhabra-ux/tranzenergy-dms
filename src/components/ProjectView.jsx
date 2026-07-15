@@ -28,7 +28,7 @@ const STATUS_COLORS = {
 };
 
 export function ProjectView({ projectId, onBack }) {
-  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, canDo, moveDrawingToDiscipline, addDiscipline } = useContext(AppContext);
+  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -42,10 +42,12 @@ export function ProjectView({ projectId, onBack }) {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [movingDrawingId, setMovingDrawingId] = useState(null);
 
-  if (!project) {
+  const hasAccess = currentUser?.role === 'Admin' || project?.assignedUsers?.includes(currentUser?.id);
+
+  if (!project || !hasAccess) {
     return (
       <div className="empty-state" style={{ flex: 1 }}>
-        <div className="empty-state-title">Project not found</div>
+        <div className="empty-state-title">Project not found or Access Denied</div>
       </div>
     );
   }

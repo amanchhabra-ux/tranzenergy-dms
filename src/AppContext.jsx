@@ -132,6 +132,7 @@ export function AppProvider({ children }) {
 
   // ─── Projects ──────────────────────────────────────────────────────────────
   const createProject = (data) => {
+    if (!canDo('manage_projects')) return;
     const assignedUsers = Array.from(new Set(['u1', currentUser?.id].filter(Boolean)));
     const p = { id: `p-${Date.now()}`, startDate: new Date().toISOString().split('T')[0], status: 'active', assignedUsers, ...data };
     setProjects(prev => [...prev, p]);
@@ -139,10 +140,12 @@ export function AppProvider({ children }) {
   };
 
   const updateProject = (id, updates) => {
+    if (!canDo('manage_projects')) return;
     setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   };
 
   const deleteProject = (id) => {
+    if (!canDo('admin')) return;
     setDrawings(prev => {
       const projDrawings = prev.filter(d => d.projectId === id);
       projDrawings.forEach(dwg => {
@@ -156,6 +159,7 @@ export function AppProvider({ children }) {
   };
 
   const assignUsersToProject = (projectId, userIds) => {
+    if (!canDo('admin')) return;
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, assignedUsers: userIds } : p));
     addLog(`Updated user assignments for project.`);
   };
@@ -166,6 +170,7 @@ export function AppProvider({ children }) {
   }, [drawings]);
 
   const createDrawing = (data) => {
+    if (!canDo('upload')) return null;
 
     const startVer = data.initialVersion || 'R0';
     const dwg = {
@@ -198,10 +203,12 @@ export function AppProvider({ children }) {
   };
 
   const updateDrawing = (id, updates) => {
+    if (!canDo('upload')) return;
     setDrawings(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
   };
 
   const moveDrawingToDiscipline = (drawingId, newDiscipline) => {
+    if (!canDo('upload')) return;
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
       addLog(`Drawing <strong>${d.code}</strong> moved to <strong>${newDiscipline}</strong>.`);
@@ -210,6 +217,7 @@ export function AppProvider({ children }) {
   };
 
   const addDiscipline = (name) => {
+    if (!canDo('upload')) return;
     const trimmed = name.trim();
     if (!trimmed) return;
     setDisciplines(prev => prev.includes(trimmed) ? prev : [...prev, trimmed]);
@@ -217,6 +225,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteDrawing = (id) => {
+    if (!canDo('upload')) return;
     setDrawings(prev => {
       const dwg = prev.find(d => d.id === id);
       if (dwg) {
@@ -230,12 +239,14 @@ export function AppProvider({ children }) {
   };
 
   const uploadCRS = (drawingId, crsData) => {
+    if (!canDo('upload')) return;
     setDrawings(prev => prev.map(d => d.id === drawingId ? { ...d, crsData } : d));
     addLog(`Uploaded Comment Resolution Sheet for drawing.`);
   };
 
   // ─── Revision Upload ───────────────────────────────────────────────────────
   const uploadRevision = useCallback((drawingId, changeSummary, pdfDataUrl, newStatus) => {
+    if (!canDo('upload')) return '';
     const authorName = currentUser?.name || 'System';
     let nextVer = '';
     let logMsg = '';
@@ -267,10 +278,11 @@ export function AppProvider({ children }) {
 
     if (logMsg) addLog(logMsg);
     return nextVer;
-  }, [currentUser, addLog]);
+  }, [currentUser, addLog, canDo]);
 
   // ─── Drawing Status ────────────────────────────────────────────────────────
   const setDrawingStatus = (id, status) => {
+    if (!canDo('approve')) return;
     const dwg = drawings.find(d => d.id === id);
     setDrawings(prev => prev.map(d => d.id === id ? { ...d, status } : d));
     if (dwg) addLog(`Drawing <strong>${dwg.code}</strong> status changed to <strong>${status}</strong>.`);
@@ -278,6 +290,7 @@ export function AppProvider({ children }) {
 
   // ─── Comment Pins ──────────────────────────────────────────────────────────
   const addPin = useCallback((drawingId, x, y, page) => {
+    if (!canDo('upload')) return null;
     let newPinId = null;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
@@ -287,9 +300,10 @@ export function AppProvider({ children }) {
       return { ...dwg, pins: [...(dwg.pins || []), pin] };
     }));
     return newPinId;
-  }, []);
+  }, [canDo]);
 
   const addComment = useCallback((drawingId, pinId, text, type = 'internal') => {
+    if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
       return {
@@ -307,24 +321,27 @@ export function AppProvider({ children }) {
         })
       };
     }));
-  }, [currentUser]);
+  }, [currentUser, canDo]);
 
   const resolvePin = useCallback((drawingId, pinId) => {
+    if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
       return { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) };
     }));
-  }, []);
+  }, [canDo]);
 
   const acceptPin = useCallback((drawingId, pinId) => {
+    if (!canDo('approve')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
       return { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) };
     }));
-  }, []);
+  }, [canDo]);
 
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
+    if (!canDo('admin')) return null;
     const u = { id: `u-${Date.now()}`, avatar: data.name.slice(0,2).toUpperCase(), color: '#6366f1', ...data };
     setUsers(prev => [...prev, u]);
     addLog(`User <strong>${u.name}</strong> added.`);
@@ -332,11 +349,13 @@ export function AppProvider({ children }) {
   };
 
   const updateUser = (id, updates) => {
+    if (!canDo('admin') && id !== currentUser?.id) return;
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
     if (id === currentUser?.id) setCurrentUser(prev => ({ ...prev, ...updates }));
   };
 
   const deleteUser = (id) => {
+    if (!canDo('admin')) return;
     const u = users.find(x => x.id === id);
     setUsers(prev => prev.filter(x => x.id !== id));
     if (u) addLog(`User <strong>${u.name}</strong> removed.`);
@@ -344,6 +363,7 @@ export function AppProvider({ children }) {
 
   // ─── Proposals ─────────────────────────────────────────────────────────────
   const uploadProposal = (data) => {
+    if (!canDo('admin')) return null;
     const p = { id: `prop-${Date.now()}`, uploadDate: new Date().toISOString(), ...data };
     setProposals(prev => [...prev, p]);
     addLog(`Proposal <strong>${p.title}</strong> uploaded.`);
@@ -351,10 +371,12 @@ export function AppProvider({ children }) {
   };
 
   const updateProposalComments = (id, followUpComments) => {
+    if (!canDo('admin')) return;
     setProposals(prev => prev.map(p => p.id === id ? { ...p, followUpComments } : p));
   };
 
   const deleteProposal = (id) => {
+    if (!canDo('admin')) return;
     const p = proposals.find(x => x.id === id);
     if (p) {
       if (p.fileData) deleteBlobUrl(p.fileData);
