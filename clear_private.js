@@ -31,6 +31,7 @@ async function run() {
     const blob = await put('db_state_v5.json', JSON.stringify(cleanState, null, 2), {
       access: 'private',
       addRandomSuffix: false,
+      allowOverwrite: true,
       contentType: 'application/json',
       token
     });
