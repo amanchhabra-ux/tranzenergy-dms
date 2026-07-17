@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   try {
     const state = req.body;
     const blob = await put('db_state_v5.json', JSON.stringify(state, null, 2), {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false,
       contentType: 'application/json',
     });

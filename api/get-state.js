@@ -1,4 +1,4 @@
-import { list } from '@vercel/blob';
+import { list, get } from '@vercel/blob';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -10,8 +10,8 @@ export default async function handler(req, res) {
     const stateBlob = blobs.find(b => b.pathname === 'db_state_v5.json');
     
     if (stateBlob) {
-      const response = await fetch(stateBlob.url);
-      const state = await response.json();
+      const blob = await get(stateBlob.url, { access: 'private', useCache: false });
+      const state = await blob.json();
       return res.status(200).json(state);
     }
     
