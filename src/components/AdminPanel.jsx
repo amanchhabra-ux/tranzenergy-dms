@@ -73,6 +73,36 @@ export function AdminPanel({ initialTab = 'users' }) {
     };
   };
 
+  const handleResetInstance = () => {
+    if (!window.confirm("Are you absolutely sure you want to delete all projects, drawings, comments, proposals, and logs? This will reset the workspace for all users!")) {
+      return;
+    }
+    setImportStatus('Resetting workspace...');
+    try {
+      const cleanData = {
+        users: [
+          { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#6366f1' },
+          { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#06b6d4' },
+          { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#10b981' },
+          { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#f59e0b' },
+          { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#94a3b8' },
+        ],
+        projects: [],
+        drawings: [],
+        proposals: [],
+        activityLog: [],
+        disciplines: ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural']
+      };
+      importWorkspaceData(cleanData);
+      setImportStatus('✓ Workspace has been reset successfully! Page will refresh in 2 seconds.');
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    } catch (err) {
+      setImportStatus('⚠️ Reset failed: ' + err.message);
+    }
+  };
+
   const tabs = [
     ...(currentUser?.role === 'Admin' ? [
       { key: 'users', label: 'Users', icon: Users },
@@ -280,7 +310,7 @@ export function AdminPanel({ initialTab = 'users' }) {
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: currentUser?.role === 'Admin' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '16px' }}>
               {/* Export Panel */}
               <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
                 <div>
@@ -308,6 +338,22 @@ export function AdminPanel({ initialTab = 'users' }) {
                   <input type="file" accept=".json" onChange={handleImportData} style={{ display: 'none' }} />
                 </label>
               </div>
+
+              {/* Reset Panel - Admin Only */}
+              {currentUser?.role === 'Admin' && (
+                <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px', border: '1px solid rgba(239, 68, 68, 0.15)' }}>
+                  <div>
+                    <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0', color: '#ef4444' }}>3. Reset Instance</h4>
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
+                      Delete all projects, drawings, and comments globally.
+                      <span style={{ color: '#ef4444', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: Clears data for all users!</span>
+                    </p>
+                  </div>
+                  <button className="btn" onClick={handleResetInstance} style={{ width: '100%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 16px', borderRadius: '6px', fontWeight: 500, fontSize: '13px' }}>
+                    <Trash2 size={14} /> Reset Workspace
+                  </button>
+                </div>
+              )}
             </div>
 
             {importStatus && (

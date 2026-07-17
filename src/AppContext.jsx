@@ -105,32 +105,29 @@ export function AppProvider({ children }) {
             if (cloud.disciplines) setDisciplines(cloud.disciplines || DEFAULT_DISCIPLINES);
             console.log("✓ Cloud database loaded successfully");
           } else {
-            console.log("No cloud database found. Initializing with default backup...");
-            const backupRes = await fetch('/tranzenergy_dms_chrome_backup.json');
-            if (backupRes.ok) {
-              const backupData = await backupRes.json();
-              if (backupData.users) setUsers(backupData.users);
-              if (backupData.projects) setProjects(backupData.projects);
-              if (backupData.drawings) setDrawings(backupData.drawings);
-              if (backupData.proposals) setProposals(backupData.proposals || []);
-              if (backupData.activityLog) setActivityLog(backupData.activityLog || []);
-              if (backupData.disciplines) setDisciplines(backupData.disciplines || DEFAULT_DISCIPLINES);
-              
-              // Seed Vercel Blob immediately
-              await fetch('/api/save-state', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  users: backupData.users,
-                  projects: backupData.projects,
-                  drawings: backupData.drawings,
-                  proposals: backupData.proposals || [],
-                  activityLog: backupData.activityLog || [],
-                  disciplines: backupData.disciplines || DEFAULT_DISCIPLINES
-                })
-              });
-              console.log("✓ Cloud database initialized with default seed data.");
-            }
+            console.log("No cloud database found. Initializing clean workspace...");
+            const cleanData = {
+              users: SEED_USERS,
+              projects: [],
+              drawings: [],
+              proposals: [],
+              activityLog: [],
+              disciplines: DEFAULT_DISCIPLINES
+            };
+            setUsers(cleanData.users);
+            setProjects(cleanData.projects);
+            setDrawings(cleanData.drawings);
+            setProposals(cleanData.proposals);
+            setActivityLog(cleanData.activityLog);
+            setDisciplines(cleanData.disciplines);
+            
+            // Seed Vercel Blob immediately
+            await fetch('/api/save-state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(cleanData)
+            });
+            console.log("✓ Cloud database initialized with a clean state.");
           }
         }
       } catch (err) {
