@@ -11,7 +11,8 @@ export default async function handler(req, res) {
     
     if (stateBlob) {
       const blob = await get(stateBlob.url, { access: 'private', useCache: false });
-      const text = await blob.text();
+      const response = new Response(blob.blob);
+      const text = await response.text();
       const state = JSON.parse(text);
       return res.status(200).json(state);
     }
