@@ -1,6 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
-import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check } from 'lucide-react';
+import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload } from 'lucide-react';
 
 const ROLE_COLORS = {
   'Admin': '#6366f1', 'Project Manager': '#06b6d4',
@@ -9,13 +9,14 @@ const ROLE_COLORS = {
 
 const AVATAR_COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#0ea5e9','#a78bfa'];
 
-export function AdminPanel() {
-  const { users, projects, drawings, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser } = useContext(AppContext);
-  const [tab, setTab] = useState('users');
+export function AdminPanel({ initialTab = 'users' }) {
+  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES } = useContext(AppContext);
+  const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
   const [form, setForm] = useState({ name: '', email: '', role: 'Engineer' });
   const [manageUsersProjectId, setManageUsersProjectId] = useState(null);
+  const [importStatus, setImportStatus] = useState('');
 
   const handleAddUser = (e) => {
     e.preventDefault();
@@ -30,10 +31,55 @@ export function AdminPanel() {
     setEditUserId(null);
   };
 
+  const handleExportData = () => {
+    const dataStr = JSON.stringify({
+      users,
+      projects,
+      drawings,
+      proposals,
+      activityLog,
+      disciplines: DISCIPLINES
+    }, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `tranzenergy_dms_backup_${new Date().toISOString().split('T')[0]}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const handleImportData = (e) => {
+    const fileReader = new FileReader();
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    fileReader.readAsText(e.target.files[0], "UTF-8");
+    fileReader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        if (!parsed.projects || !parsed.drawings) {
+          setImportStatus('⚠️ Invalid backup file format. Must contain projects and drawings.');
+          return;
+        }
+        importWorkspaceData(parsed);
+        setImportStatus('✓ Workspace data imported successfully! Page will refresh in 2 seconds.');
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } catch (err) {
+        setImportStatus('⚠️ Error parsing file: ' + err.message);
+      }
+    };
+  };
+
   const tabs = [
-    { key: 'users', label: 'Users', icon: Users },
-    { key: 'projects', label: 'Projects', icon: Folder },
-    { key: 'activity', label: 'Audit Log', icon: Activity },
+    ...(currentUser?.role === 'Admin' ? [
+      { key: 'users', label: 'Users', icon: Users },
+      { key: 'projects', label: 'Projects', icon: Folder },
+      { key: 'activity', label: 'Audit Log', icon: Activity }
+    ] : []),
+    { key: 'backup', label: 'Backup & Sync', icon: Database },
   ];
 
   return (
@@ -216,6 +262,59 @@ export function AdminPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ── Backup & Sync Tab ──────────────────────────────────────────────── */}
+        {tab === 'backup' && (
+          <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0', width: '100%' }}>
+            <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Database size={20} style={{ color: 'var(--primary-light)' }} />
+                <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: 'var(--text-primary)' }}>Export / Import Workspace Backup</h3>
+              </div>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6', margin: 0 }}>
+                This application stores all user overrides, drawing pins, transmittals, activity logs, and configurations inside your browser's local sandbox (Local Storage).
+                <br /><br />
+                To sync or migrate your data from this browser (e.g. Chrome on Mac) to another browser (e.g. Safari) or another machine (e.g. a Windows PC), download a backup file here and import it on the other side.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              {/* Export Panel */}
+              <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                <div>
+                  <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0' }}>1. Export Current Data</h4>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
+                    Download your current workspace state as a secure <code>.json</code> file.
+                  </p>
+                </div>
+                <button className="btn btn-primary" onClick={handleExportData} style={{ width: '100%' }}>
+                  <Download size={14} style={{ marginRight: '6px' }} /> Download Backup
+                </button>
+              </div>
+
+              {/* Import Panel */}
+              <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                <div>
+                  <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0' }}>2. Import Data</h4>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
+                    Upload a backup file to restore your workspace.
+                    <span style={{ color: '#ef4444', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: This overwrites local data!</span>
+                  </p>
+                </div>
+                <label className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '100%', margin: 0 }}>
+                  <Upload size={14} style={{ marginRight: '6px' }} /> Upload Backup JSON
+                  <input type="file" accept=".json" onChange={handleImportData} style={{ display: 'none' }} />
+                </label>
+              </div>
+            </div>
+
+            {importStatus && (
+              <div className="card" style={{ padding: '12px 16px', fontSize: '13px', background: importStatus.includes('successfully') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', border: importStatus.includes('successfully') ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)', color: importStatus.includes('successfully') ? '#10b981' : '#ef4444', borderRadius: '6px', textAlign: 'center', fontWeight: 500 }}>
+                {importStatus}
+              </div>
+            )}
           </div>
         )}
       </div>

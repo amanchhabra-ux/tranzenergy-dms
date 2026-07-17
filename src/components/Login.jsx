@@ -1,14 +1,38 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
-import { Zap, Lock, X } from 'lucide-react';
+import { Zap, Lock, X, Upload, Database } from 'lucide-react';
 
 export function Login() {
-  const { login, users } = useContext(AppContext);
+  const { login, users, importWorkspaceData } = useContext(AppContext);
   const [selectedAdmin, setSelectedAdmin] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
   const [email, setEmail] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [importStatus, setImportStatus] = useState('');
+
+  const handleImportData = (e) => {
+    const fileReader = new FileReader();
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    fileReader.readAsText(e.target.files[0], "UTF-8");
+    fileReader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        if (!parsed.projects || !parsed.drawings) {
+          setImportStatus('⚠️ Invalid backup file format. Must contain projects and drawings.');
+          return;
+        }
+        importWorkspaceData(parsed);
+        setImportStatus('✓ Workspace restored successfully! Page will refresh.');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } catch (err) {
+        setImportStatus('⚠️ Error parsing file: ' + err.message);
+      }
+    };
+  };
 
   const handleEmailSubmit = (e) => {
     e.preventDefault();
@@ -107,6 +131,20 @@ export function Login() {
               </span>
             ))}
           </div>
+        </div>
+
+        {/* Restore Workspace from Backup */}
+        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--primary-light)', fontWeight: 500 }}>
+            <Upload size={14} />
+            <span>Restore Workspace from Backup (.json)</span>
+            <input type="file" accept=".json" onChange={handleImportData} style={{ display: 'none' }} />
+          </label>
+          {importStatus && (
+            <div style={{ marginTop: '8px', fontSize: '11px', color: importStatus.includes('successfully') ? '#10b981' : '#ef4444', fontWeight: 500 }}>
+              {importStatus}
+            </div>
+          )}
         </div>
       </div>
 

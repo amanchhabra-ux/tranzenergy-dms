@@ -3,11 +3,11 @@ import { AppContext } from '../AppContext';
 import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
 import { Plus, Search, Upload, X, FileCheck2, FolderInput } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { upload } from '@vercel/blob/client';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 

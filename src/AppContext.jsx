@@ -385,6 +385,17 @@ export function AppProvider({ children }) {
     setProposals(prev => prev.filter(x => x.id !== id));
   };
 
+  const importWorkspaceData = (data) => {
+    if (!data) return;
+    if (data.users) setUsers(data.users);
+    if (data.projects) setProjects(data.projects);
+    if (data.drawings) setDrawings(data.drawings);
+    if (data.proposals) setProposals(data.proposals);
+    if (data.activityLog) setActivityLog(data.activityLog);
+    if (data.disciplines) setDisciplines(data.disciplines);
+    addLog('Workspace data imported successfully.', currentUser?.name || 'System');
+  };
+
   return (
     <AppContext.Provider value={{
       // State
@@ -410,7 +421,7 @@ export function AppProvider({ children }) {
       // Proposals
       uploadProposal, updateProposalComments, deleteProposal,
       // Log
-      addLog,
+      addLog, importWorkspaceData,
     }}>
       {children}
     </AppContext.Provider>

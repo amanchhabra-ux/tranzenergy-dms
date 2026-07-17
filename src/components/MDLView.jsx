@@ -2,10 +2,10 @@ import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { FileSpreadsheet, Download, Upload, Flag, Trash2, FileUp, CheckCircle, Clock, AlertCircle, X, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 

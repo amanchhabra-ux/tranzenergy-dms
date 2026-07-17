@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import { AppContext } from '../AppContext';
 import {
   LayoutDashboard, Zap, FolderOpen, Radio, Wind,
-  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText
+  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database
 } from 'lucide-react';
 
 const TYPE_META = {
@@ -64,6 +64,16 @@ export function Sidebar({ activeView, activeProjectId, onNavigate }) {
             </div>
           );
         })}
+
+        {/* Settings & Sync */}
+        <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Settings</div>
+        <div
+          className={`sidebar-item ${activeView === 'backup' ? 'active' : ''}`}
+          onClick={() => onNavigate('backup')}
+        >
+          <Database size={15} />
+          <span>Backup & Sync</span>
+        </div>
 
         {/* Admin */}
         {canDo('admin') && (

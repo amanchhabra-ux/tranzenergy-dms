@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 // Configure worker once at module level
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 

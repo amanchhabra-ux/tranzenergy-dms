@@ -26,6 +26,9 @@ function AppShell() {
     if (activeView === 'admin' && canDo('admin')) {
       return <AdminPanel />;
     }
+    if (activeView === 'backup') {
+      return <AdminPanel initialTab="backup" />;
+    }
     if (activeView === 'proposals' && canDo('admin')) {
       return <ProposalsView />;
     }

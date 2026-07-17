@@ -3,11 +3,11 @@ import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
 import { ExcelViewer } from './ExcelViewer';
 import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { upload } from '@vercel/blob/client';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 
