@@ -80,6 +80,7 @@ export function AppProvider({ children }) {
     saved.currentUser.avatar = 'AC';
   }
 
+  const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(saved?.currentUser || null);
   const [users,       setUsers]       = useState(saved?.users       || SEED_USERS);
   const [projects,    setProjects]    = useState(saved?.projects    || SEED_PROJECTS);
@@ -88,11 +89,98 @@ export function AppProvider({ children }) {
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
   const [disciplines, setDisciplines] = useState(saved?.disciplines || DEFAULT_DISCIPLINES);
 
-  // Persist on change
+  // Fetch initial state from Vercel Blob cloud database on mount
   useEffect(() => {
-    if (!currentUser) return;
-    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines });
-  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines]);
+    async function loadCloudState() {
+      try {
+        const res = await fetch('/api/get-state');
+        if (res.ok) {
+          const cloud = await res.json();
+          if (cloud && !cloud.notFound) {
+            if (cloud.users) setUsers(cloud.users);
+            if (cloud.projects) setProjects(cloud.projects);
+            if (cloud.drawings) setDrawings(cloud.drawings);
+            if (cloud.proposals) setProposals(cloud.proposals || []);
+            if (cloud.activityLog) setActivityLog(cloud.activityLog || []);
+            if (cloud.disciplines) setDisciplines(cloud.disciplines || DEFAULT_DISCIPLINES);
+            console.log("✓ Cloud database loaded successfully");
+          } else {
+            console.log("No cloud database found. Initializing with default backup...");
+            const backupRes = await fetch('/tranzenergy_dms_chrome_backup.json');
+            if (backupRes.ok) {
+              const backupData = await backupRes.json();
+              if (backupData.users) setUsers(backupData.users);
+              if (backupData.projects) setProjects(backupData.projects);
+              if (backupData.drawings) setDrawings(backupData.drawings);
+              if (backupData.proposals) setProposals(backupData.proposals || []);
+              if (backupData.activityLog) setActivityLog(backupData.activityLog || []);
+              if (backupData.disciplines) setDisciplines(backupData.disciplines || DEFAULT_DISCIPLINES);
+              
+              // Seed Vercel Blob immediately
+              await fetch('/api/save-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  users: backupData.users,
+                  projects: backupData.projects,
+                  drawings: backupData.drawings,
+                  proposals: backupData.proposals || [],
+                  activityLog: backupData.activityLog || [],
+                  disciplines: backupData.disciplines || DEFAULT_DISCIPLINES
+                })
+              });
+              console.log("✓ Cloud database initialized with default seed data.");
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load cloud database:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadCloudState();
+  }, []);
+
+  // Sync to Vercel Blob cloud database with 1500ms debounce
+  const saveToCloud = useCallback(async (stateData) => {
+    try {
+      const stripped = {
+        ...stateData,
+        currentUser: null,
+        drawings: stateData.drawings.map(d => ({
+          ...d,
+          versions: d.versions.map(v => ({ ...v, pdfData: v.pdfData?.startsWith('http') ? v.pdfData : null })),
+          pdfData: d.pdfData?.startsWith('http') ? d.pdfData : null
+        })),
+        proposals: (stateData.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith('http') ? p.fileData : null }))
+      };
+      await fetch('/api/save-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stripped)
+      });
+      console.log("✓ Cloud database saved successfully");
+    } catch (e) {
+      console.error("Failed to save state to cloud:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const stateData = { users, projects, drawings, proposals, activityLog, disciplines };
+    
+    // Save to local storage instantly for offline fallback
+    saveState({ currentUser, ...stateData });
+
+    // Debounce cloud save
+    const timer = setTimeout(() => {
+      saveToCloud(stateData);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, loading, saveToCloud]);
 
   // ─── Activity Log ──────────────────────────────────────────────────────────
   const addLog = useCallback((message, authorName) => {
@@ -399,7 +487,7 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={{
       // State
-      currentUser, users, projects, drawings, proposals, activityLog,
+      currentUser, users, projects, drawings, proposals, activityLog, loading,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth

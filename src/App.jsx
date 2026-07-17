@@ -8,9 +8,41 @@ import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
 
 function AppShell() {
-  const { currentUser, canDo } = useContext(AppContext);
+  const { currentUser, canDo, loading } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
+
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+        color: '#fff',
+        fontFamily: 'Outfit, sans-serif'
+      }}>
+        <div style={{
+          width: '50px',
+          height: '50px',
+          border: '4px solid rgba(255,255,255,0.1)',
+          borderTopColor: '#6366f1',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+          marginBottom: '20px'
+        }} />
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+        <div style={{ fontSize: '18px', fontWeight: 500, letterSpacing: '0.05em' }}>TRANZENERGY DMS</div>
+        <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '6px' }}>Connecting to cloud database...</div>
+      </div>
+    );
+  }
 
   if (!currentUser) return <Login />;
 
