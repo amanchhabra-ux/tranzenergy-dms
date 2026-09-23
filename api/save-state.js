@@ -2,9 +2,9 @@ import { put, BlobPreconditionFailedError } from '@vercel/blob';
 
 const PATH = 'db_state_v5.json';
 
-// Body: { state, etag } — etag is the version the client last loaded.
+// Body: { state, etag } — etag is the version the client last loaded
+// (null only when creating the database for the first time).
 // If someone else saved in between, responds 409 so the client can merge and retry.
-// (A bare state object is still accepted for older clients.)
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -12,9 +12,12 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   const body = req.body || {};
-  const isWrapped = body && typeof body === 'object' && 'state' in body;
-  const state = isWrapped ? body.state : body;
-  const etag = isWrapped ? body.etag : undefined;
+  // Old versions of the app posted the bare state without a version and would
+  // overwrite everyone's changes; refuse those so a stale tab can't clobber data.
+  if (!body || typeof body !== 'object' || !('state' in body)) {
+    return res.status(426).json({ error: 'outdated_client', message: 'Please refresh the page to get the latest version of the app.' });
+  }
+  const { state, etag } = body;
 
   if (!state || typeof state !== 'object' || !Array.isArray(state.users)) {
     return res.status(400).json({ error: 'Invalid state' });
