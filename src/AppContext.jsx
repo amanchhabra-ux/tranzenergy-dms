@@ -1,4 +1,5 @@
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
+import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel } from './utils/crs';
 import { uploadCrsFile } from './utils/uploadFile';
 
@@ -54,6 +55,22 @@ async function deleteBlobUrl(url) {
   }
 }
 
+// What goes into the shared database (no inline file data, no signed-in user)
+function stripForCloud(data) {
+  return {
+    users: data.users || [],
+    projects: data.projects || [],
+    drawings: (data.drawings || []).map(d => ({
+      ...d,
+      versions: (d.versions || []).map(v => ({ ...v, pdfData: v.pdfData?.startsWith?.('http') ? v.pdfData : null })),
+      pdfData: d.pdfData?.startsWith?.('http') ? d.pdfData : null,
+    })),
+    proposals: (data.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith?.('http') ? p.fileData : null })),
+    activityLog: data.activityLog || [],
+    disciplines: data.disciplines || [],
+  };
+}
+
 function saveState(data) {
   try {
     // We now store Vercel Blob URLs instead of base64, so we don't need to strip them.
@@ -100,95 +117,138 @@ export function AppProvider({ children }) {
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
   const [disciplines, setDisciplines] = useState(withOther(saved?.disciplines));
 
-  // Fetch initial state from Vercel Blob cloud database on mount
-  useEffect(() => {
-    async function loadCloudState() {
-      try {
-        const res = await fetch('/api/get-state');
-        if (res.ok) {
-          const cloud = await res.json();
-          if (cloud && !cloud.notFound) {
-            if (cloud.users) setUsers(cloud.users);
-            if (cloud.projects) setProjects(cloud.projects);
-            if (cloud.drawings) setDrawings(cloud.drawings);
-            if (cloud.proposals) setProposals(cloud.proposals || []);
-            if (cloud.activityLog) setActivityLog(cloud.activityLog || []);
-            if (cloud.disciplines) setDisciplines(withOther(cloud.disciplines));
-            console.log("✓ Cloud database loaded successfully");
-          } else {
-            console.log("No cloud database found. Initializing clean workspace...");
-            const cleanData = {
-              users: SEED_USERS,
-              projects: [],
-              drawings: [],
-              proposals: [],
-              activityLog: [],
-              disciplines: DEFAULT_DISCIPLINES
-            };
-            setUsers(cleanData.users);
-            setProjects(cleanData.projects);
-            setDrawings(cleanData.drawings);
-            setProposals(cleanData.proposals);
-            setActivityLog(cleanData.activityLog);
-            setDisciplines(cleanData.disciplines);
-            
-            // Seed Vercel Blob immediately
-            await fetch('/api/save-state', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(cleanData)
-            });
-            console.log("✓ Cloud database initialized with a clean state.");
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load cloud database:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadCloudState();
+  // ─── Shared cloud database ────────────────────────────────────────────────
+  // The whole workspace is one JSON document in Vercel Blob. Every browser:
+  //  1. loads it on start (never writes until that load has succeeded),
+  //  2. saves its changes with the version it loaded (etag); if someone else
+  //     saved in between, it merges both sets of changes and saves again,
+  //  3. checks for other people's changes every 20 s and when the tab regains focus.
+  const [cloudStatus, setCloudStatus] = useState('connecting'); // connecting | ok | offline
+  const stateRef = useRef(null);
+  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines };
+  const baseRef = useRef(null);     // last version seen in the cloud (stripped)
+  const etagRef = useRef(null);
+  const cloudReady = useRef(false);
+  const saving = useRef(false);
+  const pushAgain = useRef(false);
+
+  const applyState = useCallback((s) => {
+    setUsers(s.users?.length ? s.users : SEED_USERS);
+    setProjects(s.projects || []);
+    setDrawings(s.drawings || []);
+    setProposals(s.proposals || []);
+    setActivityLog(s.activityLog || []);
+    setDisciplines(withOther(s.disciplines));
   }, []);
 
-  // Sync to Vercel Blob cloud database with 1500ms debounce
-  const saveToCloud = useCallback(async (stateData) => {
+  // → { status: 'same' } | { status: 'notFound' } | { status: 'ok', state, etag }
+  const fetchCloud = useCallback(async (knownEtag) => {
+    const res = await fetch(`/api/get-state${knownEtag ? `?etag=${encodeURIComponent(knownEtag)}` : ''}`, { cache: 'no-store' });
+    if (res.status === 304) return { status: 'same' };
+    if (!res.ok) throw new Error(`Cloud load failed (${res.status})`);
+    const body = await res.json();
+    if (body?.notFound) return { status: 'notFound' };
+    return { status: 'ok', state: stripForCloud(body), etag: res.headers.get('x-state-etag') || null };
+  }, []);
+
+  const pushToCloud = useCallback(async () => {
+    if (!cloudReady.current) return;
+    if (saving.current) { pushAgain.current = true; return; }
+    const local = stripForCloud(stateRef.current);
+    if (baseRef.current && stateEquals(local, baseRef.current)) return; // nothing new
+    saving.current = true;
     try {
-      const stripped = {
-        ...stateData,
-        currentUser: null,
-        drawings: stateData.drawings.map(d => ({
-          ...d,
-          versions: d.versions.map(v => ({ ...v, pdfData: v.pdfData?.startsWith('http') ? v.pdfData : null })),
-          pdfData: d.pdfData?.startsWith('http') ? d.pdfData : null
-        })),
-        proposals: (stateData.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith('http') ? p.fileData : null }))
-      };
-      await fetch('/api/save-state', {
+      const res = await fetch('/api/save-state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stripped)
+        body: JSON.stringify({ state: local, etag: etagRef.current }),
       });
-      console.log("✓ Cloud database saved successfully");
+      if (res.status === 409) {
+        // someone else saved first: merge their changes with ours, then save again
+        const remote = await fetchCloud();
+        if (remote.status === 'ok') {
+          const merged = mergeState(baseRef.current, local, remote.state);
+          baseRef.current = remote.state;
+          etagRef.current = remote.etag;
+          applyState(merged);
+          pushAgain.current = true;
+        }
+      } else if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        baseRef.current = local;
+        etagRef.current = body.etag || res.headers.get('x-state-etag') || null;
+        setCloudStatus('ok');
+      } else {
+        throw new Error(`Save failed (${res.status})`);
+      }
     } catch (e) {
-      console.error("Failed to save state to cloud:", e);
+      console.error('Failed to save state to cloud:', e);
+      setCloudStatus('offline');
+    } finally {
+      saving.current = false;
+      if (pushAgain.current) { pushAgain.current = false; setTimeout(() => pushToCloud(), 300); }
     }
-  }, []);
+  }, [fetchCloud, applyState]);
 
+  // Pull other people's changes (and recover if the first load failed)
+  const pullFromCloud = useCallback(async () => {
+    if (saving.current) return;
+    try {
+      const r = await fetchCloud(cloudReady.current ? etagRef.current : undefined);
+      if (r.status === 'same') { setCloudStatus('ok'); return; }
+      if (r.status === 'notFound') {
+        if (!cloudReady.current) {
+          // brand-new workspace: seed the cloud with what this browser has
+          cloudReady.current = true; baseRef.current = null; etagRef.current = null;
+          setCloudStatus('ok');
+          pushToCloud();
+        }
+        return;
+      }
+      const local = stripForCloud(stateRef.current);
+      const merged = cloudReady.current ? mergeState(baseRef.current, local, r.state) : r.state;
+      baseRef.current = r.state;
+      etagRef.current = r.etag;
+      cloudReady.current = true;
+      setCloudStatus('ok');
+      if (!stateEquals(merged, local)) applyState(merged);
+      if (!stateEquals(merged, r.state)) pushToCloud(); // we still have changes to send
+    } catch (err) {
+      console.error('Failed to load cloud database:', err);
+      setCloudStatus('offline');
+    }
+  }, [fetchCloud, applyState, pushToCloud]);
+
+  // First load
+  useEffect(() => {
+    pullFromCloud().finally(() => setLoading(false));
+  }, [pullFromCloud]);
+
+  // Keep up with other people's changes
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === 'visible') pullFromCloud(); };
+    const iv = setInterval(tick, 20000);
+    window.addEventListener('focus', tick);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(iv); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); };
+  }, [pullFromCloud]);
+
+  // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
     if (loading) return;
-
-    const stateData = { users, projects, drawings, proposals, activityLog, disciplines };
-    
-    // Save to local storage instantly for offline fallback
-    saveState({ currentUser, ...stateData });
-
-    // Debounce cloud save
-    const timer = setTimeout(() => {
-      saveToCloud(stateData);
-    }, 1500);
-
+    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines });
+    const timer = setTimeout(() => pushToCloud(), 1500);
     return () => clearTimeout(timer);
-  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, loading, saveToCloud]);
+  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, loading, pushToCloud]);
+
+  // Keep the signed-in user in step with the shared user list (role changes, removal)
+  useEffect(() => {
+    if (!currentUser || loading) return;
+    const u = users.find(x => x.id === currentUser.id);
+    if (!u) setCurrentUser(null);
+    else if (!stateEquals(u, currentUser)) setCurrentUser(u);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, loading]);
 
   // ─── Activity Log ──────────────────────────────────────────────────────────
   const addLog = useCallback((message, authorName) => {
@@ -403,9 +463,9 @@ export function AppProvider({ children }) {
   // Any drawing whose CRS changed (reply, status, new comment, pin comment) gets
   // its Excel rewritten here, one at a time. Because the "needs sync" marker is
   // saved with the drawing, a change is never lost to a reload or a view switch.
-  const drawingsRef = React.useRef(drawings);
+  const drawingsRef = useRef(drawings);
   drawingsRef.current = drawings;
-  const syncBusy = React.useRef(false);
+  const syncBusy = useRef(false);
   const [syncKick, setSyncKick] = useState(0);
   const pendingSync = drawings.filter(crsNeedsSync).map(d => `${d.id}:${d.crsRev}`).join('|');
   useEffect(() => {
@@ -593,7 +653,7 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={{
       // State
-      currentUser, users, projects, drawings, proposals, activityLog, loading,
+      currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth

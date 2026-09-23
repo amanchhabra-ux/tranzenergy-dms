@@ -448,7 +448,7 @@ function ManageProjectUsersModal({ project, users, onClose, onSave }) {
                 />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '13px' }}>{u.name} {u.role === 'Admin' && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>(Admin - auto access)</span>}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{u.role}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{u.role}{u.email ? ` · ${u.email}` : ''}</div>
                 </div>
               </label>
             ))}

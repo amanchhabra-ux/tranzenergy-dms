@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 
 // ─── Local dev storage ──────────────────────────────────────────────────────
 // Only active for `npm run dev`. Stands in for the /api functions so that the
@@ -33,13 +34,25 @@ function localDevStorage() {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost')
         try {
+          const etagOf = (text) => '"' + crypto.createHash('sha1').update(text).digest('hex') + '"'
           if (url.pathname === '/api/get-state' && req.method === 'GET') {
             if (!fs.existsSync(stateFile)) return json(res, 200, { notFound: true })
-            return json(res, 200, JSON.parse(fs.readFileSync(stateFile, 'utf8')))
+            const text = fs.readFileSync(stateFile, 'utf8')
+            res.setHeader('x-state-etag', etagOf(text))
+            if (url.searchParams.get('etag') === etagOf(text)) { res.statusCode = 304; return res.end() }
+            return json(res, 200, JSON.parse(text))
           }
           if (url.pathname === '/api/save-state' && req.method === 'POST') {
-            fs.writeFileSync(stateFile, (await readBody(req)).toString('utf8'))
-            return json(res, 200, { success: true })
+            const body = JSON.parse((await readBody(req)).toString('utf8') || '{}')
+            const wrapped = body && typeof body === 'object' && 'state' in body
+            const state = wrapped ? body.state : body
+            if (wrapped && body.etag && fs.existsSync(stateFile) && etagOf(fs.readFileSync(stateFile, 'utf8')) !== body.etag) {
+              return json(res, 409, { error: 'conflict' })
+            }
+            const text = JSON.stringify(state)
+            fs.writeFileSync(stateFile, text)
+            res.setHeader('x-state-etag', etagOf(text))
+            return json(res, 200, { success: true, etag: etagOf(text) })
           }
           if (url.pathname === '/api/local-upload' && req.method === 'POST') {
             const rel = url.searchParams.get('path') || `upload-${Date.now()}`

@@ -8,7 +8,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
 
 function AppShell() {
-  const { currentUser, canDo, loading } = useContext(AppContext);
+  const { currentUser, canDo, loading, cloudStatus } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
 
@@ -75,6 +75,11 @@ function AppShell() {
         onNavigate={navigateTo}
       />
       <div className="main-content">
+        {cloudStatus === 'offline' && (
+          <div style={{ background: 'var(--error-glow)', color: 'var(--error)', fontSize: 12, padding: '6px 16px', borderBottom: '1px solid rgba(239,68,68,0.3)' }}>
+            ⚠️ Can't reach the shared database. Your changes are kept in this browser and will be saved when the connection is back.
+          </div>
+        )}
         {renderContent()}
       </div>
     </div>
