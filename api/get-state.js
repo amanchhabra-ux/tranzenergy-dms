@@ -17,6 +17,11 @@ export default async function handler(req, res) {
     const stateBlob = blobs.find(b => b.pathname === PATH);
     if (!stateBlob) return res.status(200).json({ notFound: true });
 
+    if (req.query?.debug === 'etag') {
+      const g = await get(stateBlob.url, { access: 'private', useCache: false });
+      if (g?.stream) await g.stream.cancel();
+      return res.status(200).json({ listEtag: stateBlob.etag, getEtag: g?.blob?.etag, header: g?.headers?.get('etag') });
+    }
     const known = typeof req.query?.etag === 'string' ? req.query.etag : undefined;
     const result = await get(stateBlob.url, { access: 'private', useCache: false, ifNoneMatch: known });
     if (!result) return res.status(200).json({ notFound: true });
