@@ -6,7 +6,9 @@ import { BulkUploadModal } from './BulkUploadModal';
 import { classifyDrawing } from '../utils/drawingClassifier';
 import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { uploadFile } from '../utils/uploadFile';
+import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
+import { CrsPicker } from './CrsPicker';
+import { readCrs } from '../utils/crs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -31,7 +33,7 @@ const STATUS_COLORS = {
 };
 
 export function ProjectView({ projectId, onBack }) {
-  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
+  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, uploadCRS, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -284,6 +286,7 @@ export function ProjectView({ projectId, onBack }) {
           onClose={() => setShowRegisterModal(false)}
           onCreated={(id) => { setActiveDrawingId(id); setActiveTab('all'); setShowRegisterModal(false); }}
           createDrawing={createDrawing}
+          uploadCRS={uploadCRS}
         />
       )}
 
@@ -327,7 +330,29 @@ export function ProjectView({ projectId, onBack }) {
 }
 
 // ─── Register Drawing Modal ──────────────────────────────────────────────────
-function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreated, createDrawing }) {
+function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreated, createDrawing, uploadCRS }) {
+  const [crsFile, setCrsFile] = useState(null);
+  const [crsParsed, setCrsParsed] = useState(null);
+  const [crsMsg, setCrsMsg] = useState('');
+
+  // Picking a CRS Excel fills any empty fields from its title block
+  const handleCrsPick = async (file) => {
+    setCrsFile(file); setCrsParsed(null); setCrsMsg('');
+    if (!file) return;
+    const parsed = await readCrs(file);
+    setCrsParsed(parsed);
+    const m = parsed.meta || {};
+    const filled = [];
+    const fill = (val, cur, set, label, transform = v => v) => { if (val && !String(cur || '').trim()) { set(transform(val)); filled.push(label); } };
+    fill(m.code, code, setCode, 'drawing no.', v => v.toUpperCase());
+    fill(m.title, title, setTitle, 'title');
+    fill(m.clientName, clientName, setClientName, 'client');
+    fill(m.contractor, contractor, setContractor, 'contractor');
+    fill(m.consultant, consultant, setConsultant, 'consultant');
+    fill(m.project ? `Project: ${m.project}` : '', desc, setDesc, 'description');
+    if (m.code) { const inf = inferCategory(m.code, '', m.title || ''); if (inf && !pdfFile) setDiscipline(inf); }
+    setCrsMsg(`CRS read: ${parsed.comments.length} comment${parsed.comments.length === 1 ? '' : 's'}${filled.length ? ` · filled ${filled.join(', ')}` : ''}`);
+  };
   const [code, setCode] = useState('');
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
@@ -582,6 +607,10 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       contractor,
       changeSummary: 'Initial issue R0.'
     });
+    if (dwg && crsFile) {
+      try { uploadCRS(dwg.id, await uploadCrsFile(dwg.code, crsFile), crsParsed || await readCrs(crsFile), crsFile.name); }
+      catch (err) { alert('⚠️ Drawing registered, but the CRS upload failed: ' + err.message); }
+    }
     setUploading(false);
     onCreated(dwg?.id || null);
   };
@@ -617,6 +646,11 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Drawing info will be auto-extracted · Will be saved as R0</div>
                 </div>
               )}
+            </div>
+
+            <div style={{ marginTop: '-4px', marginBottom: '16px' }}>
+              <CrsPicker file={crsFile} onChange={handleCrsPick} />
+              {crsMsg && <div style={{ fontSize: '11px', color: 'var(--success)', marginTop: '4px' }}>✓ {crsMsg}</div>}
             </div>
 
             {pdfFile && (

@@ -17,3 +17,11 @@ export async function uploadFile(pathname, file) {
   }
   return upload(pathname, file, { access: 'public', handleUploadUrl: '/api/upload' });
 }
+
+// Upload a CRS Excel file for a drawing and return its URL.
+export async function uploadCrsFile(drawingCode, file) {
+  const code = String(drawingCode || 'UNKNOWN').toUpperCase().replace(/[^\w.-]+/g, '_');
+  const name = (file.name || 'CRS.xlsx').replace(/[^\w.\-() ]+/g, '_');
+  const res = await uploadFile(`crs/${code}/${Date.now()}_${name}`, file);
+  return res.url;
+}

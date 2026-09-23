@@ -1,9 +1,10 @@
 import React, { useContext, useRef, useState } from 'react';
 import { AppContext } from '../AppContext';
-import { X, Upload, FolderUp, Trash2, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Upload, FolderUp, Trash2, CheckCircle2, AlertCircle, Loader2, FileSpreadsheet } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { uploadFile } from '../utils/uploadFile';
-import { classifyDrawing, extractDrawingInfo, OTHER_CATEGORY } from '../utils/drawingClassifier';
+import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
+import { readCrs } from '../utils/crs';
+import { classifyDrawing, extractDrawingInfo, OTHER_CATEGORY, isExcelFile, matchCrsToDrawing } from '../utils/drawingClassifier';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -31,10 +32,13 @@ async function readFirstPageText(file) {
 
 export function BulkUploadModal({ project, onClose, onDone }) {
   const {
-    DISCIPLINES, STATUSES, drawings, createDrawing, uploadRevision, addDiscipline, addLog,
+    DISCIPLINES, STATUSES, drawings, createDrawing, uploadRevision, uploadCRS, addDiscipline, addLog,
   } = useContext(AppContext);
 
-  const [rows, setRows] = useState([]);           // one row per file
+  const [rows, setRows] = useState([]);           // one row per PDF
+  const [crsFiles, setCrsFiles] = useState([]);   // Excel CRS files: { id, file, assignedTo: '' | 'row:<id>' | 'dwg:<id>', status, message }
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const [analyzing, setAnalyzing] = useState(false);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
@@ -50,14 +54,46 @@ export function BulkUploadModal({ project, onClose, onDone }) {
   );
 
   const updateRow = (id, patch) => setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+  const updateCrs = (id, patch) => setCrsFiles(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+  const projectDrawings = drawings.filter(d => d.projectId === project.id);
+
+  // Match each unassigned CRS Excel to a drawing in this batch, or an existing drawing
+  const autoMatchCrs = () => {
+    const candidates = [
+      ...rowsRef.current.map(r => ({ key: `row:${r.id}`, code: r.code, fileName: r.file.name })),
+      ...projectDrawings.map(d => ({ key: `dwg:${d.id}`, code: d.code })),
+    ];
+    setCrsFiles(prev => prev.map(c => {
+      if (c.assignedTo) return c;
+      const byName = matchCrsToDrawing(c.file.name, candidates);
+      const byMeta = c.parsed?.meta?.code ? matchCrsToDrawing(c.parsed.meta.code, candidates) : null;
+      return { ...c, assignedTo: byName || byMeta || '' };
+    }));
+  };
 
   // ── Add + analyse files ────────────────────────────────────────────────
   const addFiles = async (fileList) => {
-    const incoming = Array.from(fileList || []);
+    const incoming = Array.from(fileList || []).filter(f => !f.name.startsWith('~$') && !f.name.startsWith('.'));
     const pdfs = incoming.filter(f => f.name.toLowerCase().endsWith('.pdf'));
-    const skipped = incoming.length - pdfs.length;
+    const excels = incoming.filter(f => isExcelFile(f.name));
+    const skipped = incoming.length - pdfs.length - excels.length;
+
+    if (excels.length) {
+      const seenX = new Set(crsFiles.map(c => `${c.file.name}|${c.file.size}`));
+      const freshX = excels.filter(f => !seenX.has(`${f.name}|${f.size}`)).map((file, i) => ({
+        id: `crs-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+        file, assignedTo: '', status: 'ready', message: '',
+      }));
+      setCrsFiles(prev => [...prev, ...freshX]);
+      // read each CRS so we can match on the drawing no. inside it and preview its comments
+      await Promise.all(freshX.map(async (c) => {
+        const parsed = await readCrs(c.file);
+        updateCrs(c.id, { parsed });
+      }));
+    }
     if (!pdfs.length) {
-      if (skipped) alert(`${skipped} file(s) skipped — only PDF drawings can be bulk uploaded.`);
+      setTimeout(autoMatchCrs, 0);
+      if (skipped) alert(`${skipped} file(s) skipped — only PDF drawings and Excel CRS files are supported.`);
       return;
     }
 
@@ -72,7 +108,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
         confidence: 'low', reason: '', status: 'pending', message: '',
         include: file.size <= MAX_FILE_MB * 1024 * 1024,
       }));
-    if (!fresh.length) return;
+    if (!fresh.length) { setTimeout(autoMatchCrs, 0); return; }
     setRows(prev => [...prev, ...fresh]);
     setAnalyzing(true);
 
@@ -96,7 +132,8 @@ export function BulkUploadModal({ project, onClose, onDone }) {
       });
     }
     setAnalyzing(false);
-    if (skipped) alert(`${skipped} non-PDF file(s) were skipped.`);
+    setTimeout(autoMatchCrs, 0);
+    if (skipped) alert(`${skipped} file(s) skipped — only PDF drawings and Excel CRS files are supported.`);
   };
 
   // ── Upload everything ──────────────────────────────────────────────────
@@ -108,6 +145,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
     setRunning(true);
     const queue = rows.filter(r => r.include && r.status === 'ready');
     const createdByCode = new Map(); // drawings created in this batch, by code
+    const rowToDwgId = new Map();     // batch row id -> drawing id (for attaching CRS)
     let ok = 0, fail = 0;
 
     const worker = async () => {
@@ -125,6 +163,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
           const existing = existingByCode.get(code) || createdByCode.get(code);
           if (existing) {
             uploadRevision(existing.id, `Bulk upload: ${row.file.name}`, blob.url, defaultStatus);
+            rowToDwgId.set(row.id, existing.id);
             updateRow(row.id, { status: 'done', message: 'Added as new revision' });
           } else {
             const dwg = createDrawing({
@@ -132,7 +171,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
               projectId: project.id, status: defaultStatus, pdfData: blob.url,
               initialVersion: row.rev || 'R0', changeSummary: `Initial issue (bulk upload: ${row.file.name}).`,
             });
-            if (dwg) createdByCode.set(code, dwg);
+            if (dwg) { createdByCode.set(code, dwg); rowToDwgId.set(row.id, dwg.id); }
             updateRow(row.id, { status: 'done', message: `Registered in ${row.category}` });
           }
           ok++;
@@ -145,7 +184,29 @@ export function BulkUploadModal({ project, onClose, onDone }) {
     };
 
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    addLog(`Bulk upload to <strong>${project.code}</strong>: ${ok} drawing(s) uploaded${fail ? `, ${fail} failed` : ''}.`);
+
+    // Attach CRS Excel files to their drawings
+    let crsOk = 0;
+    for (const c of crsFiles) {
+      if (!c.assignedTo) { updateCrs(c.id, { status: 'skipped', message: 'Not attached' }); continue; }
+      const [kind, key] = [c.assignedTo.slice(0, 3), c.assignedTo.slice(4)];
+      const dwgId = kind === 'dwg' ? key : rowToDwgId.get(key);
+      if (!dwgId) { updateCrs(c.id, { status: 'error', message: 'Its drawing was not uploaded' }); continue; }
+      const dwgCode = kind === 'dwg'
+        ? projectDrawings.find(d => d.id === dwgId)?.code
+        : rowsRef.current.find(r => r.id === key)?.code;
+      updateCrs(c.id, { status: 'uploading' });
+      try {
+        uploadCRS(dwgId, await uploadCrsFile(dwgCode, c.file), c.parsed || await readCrs(c.file), c.file.name);
+        updateCrs(c.id, { status: 'done', message: `Attached to ${dwgCode}` });
+        crsOk++;
+      } catch (err) {
+        console.error('CRS upload failed', c.file.name, err);
+        updateCrs(c.id, { status: 'error', message: err?.message || 'Upload failed' });
+      }
+    }
+
+    addLog(`Bulk upload to <strong>${project.code}</strong>: ${ok} drawing(s)${crsOk ? ` and ${crsOk} CRS sheet(s)` : ''} uploaded${fail ? `, ${fail} failed` : ''}.`);
     setRunning(false);
     setFinished(true);
   };
@@ -161,6 +222,12 @@ export function BulkUploadModal({ project, onClose, onDone }) {
   const batchCodes = rows.filter(r => r.include).map(r => r.code.trim().toUpperCase());
   const dupInBatch = (code) => batchCodes.filter(c => c === code.trim().toUpperCase()).length > 1;
   const locked = running || finished;
+  const crsAssigned = crsFiles.filter(c => c.assignedTo).length;
+  const crsForRow = (rowId) => crsFiles.find(c => c.assignedTo === `row:${rowId}`);
+  const crsTargetLabel = (a) => {
+    if (a.startsWith('row:')) { const r = rows.find(x => `row:${x.id}` === a); return r ? r.code || r.file.name : ''; }
+    const d = projectDrawings.find(x => `dwg:${x.id}` === a); return d ? d.code : '';
+  };
 
   const setAllCategory = (cat) => setRows(prev => prev.map(r =>
     (filterCat === 'all' || r.category === filterCat) && r.status === 'ready' ? { ...r, category: cat, confidence: 'high', reason: 'Set manually' } : r
@@ -184,14 +251,14 @@ export function BulkUploadModal({ project, onClose, onDone }) {
               onDragLeave={() => setDragOver(false)}
               onDrop={e => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
             >
-              <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: 'none' }}
+              <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.xlsm" multiple style={{ display: 'none' }}
                 onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
               <input ref={folderRef} type="file" webkitdirectory="" directory="" multiple style={{ display: 'none' }}
                 onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
               <Upload size={26} style={{ color: 'var(--text-muted)', margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600, fontSize: '14px' }}>Drop PDF drawings here, or click to choose files</div>
+              <div style={{ fontWeight: 600, fontSize: '14px' }}>Drop PDF drawings and their CRS Excel sheets here, or click to choose files</div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Each file is read and sorted into Electrical, Civil, Structural, Mechanical, SCADA, P&C or Other automatically. You can change any category before uploading.
+                Each drawing is sorted into Electrical, Civil, Structural, Mechanical, SCADA, P&C or Other, and each CRS Excel is matched to its drawing by drawing number or file name. You can change anything before uploading.
               </div>
               <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: '10px' }}
                 onClick={e => { e.stopPropagation(); folderRef.current?.click(); }}>
@@ -200,7 +267,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
             </div>
           )}
 
-          {rows.length > 0 && (
+          {(rows.length > 0 || crsFiles.length > 0) && (
             <>
               {/* Summary + bulk controls */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
@@ -267,6 +334,11 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                           <td style={{ maxWidth: 200 }}>
                             <div className="truncate" title={r.file.name} style={{ fontSize: '12px' }}>{r.file.name}</div>
                             {r.folder && <div className="truncate" style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{r.folder}</div>}
+                            {crsForRow(r.id) && (
+                              <div className="truncate" style={{ fontSize: '10px', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 3 }} title={crsForRow(r.id).file.name}>
+                                <FileSpreadsheet size={10} /> CRS: {crsForRow(r.id).file.name}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <input className="form-input" style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', padding: '4px 6px' }}
@@ -311,7 +383,10 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                           <td>
                             {!locked && (
                               <button className="btn btn-ghost btn-icon" title="Remove" style={{ padding: 2 }}
-                                onClick={() => setRows(prev => prev.filter(x => x.id !== r.id))}>
+                                onClick={() => {
+                                  setRows(prev => prev.filter(x => x.id !== r.id));
+                                  setCrsFiles(prev => prev.map(c => (c.assignedTo === `row:${r.id}` ? { ...c, assignedTo: '' } : c)));
+                                }}>
                                 <Trash2 size={12} />
                               </button>
                             )}
@@ -322,6 +397,75 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                   </tbody>
                 </table>
               </div>
+
+              {crsFiles.length > 0 && (
+                <div style={{ marginTop: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <FileSpreadsheet size={13} /> CRS Excel files · {crsAssigned} of {crsFiles.length} attached
+                  </div>
+                  <div className="table-wrapper">
+                    <table className="data-table">
+                      <tbody>
+                        {crsFiles.map(c => {
+                          const existingTarget = c.assignedTo.startsWith('dwg:') && projectDrawings.find(d => `dwg:${d.id}` === c.assignedTo);
+                          return (
+                            <tr key={c.id}>
+                              <td style={{ maxWidth: 260 }}>
+                                <div className="truncate" title={c.file.name} style={{ fontSize: '12px' }}>{c.file.name}</div>
+                                {c.parsed && (
+                                  <div className="truncate" style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                    {c.parsed.comments.length} comment{c.parsed.comments.length === 1 ? '' : 's'}
+                                    {c.parsed.meta?.code ? ` · Drg ${c.parsed.meta.code}` : ''}
+                                    {c.parsed.meta?.clientName ? ` · ${c.parsed.meta.clientName}` : ''}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ width: 340 }}>
+                                <select className="form-input" style={{ fontSize: '12px', padding: '4px 6px' }}
+                                  value={c.assignedTo} disabled={locked}
+                                  onChange={e => updateCrs(c.id, { assignedTo: e.target.value })}>
+                                  <option value="">— Don't attach —</option>
+                                  {rows.length > 0 && (
+                                    <optgroup label="Drawings in this upload">
+                                      {rows.filter(r => r.include).map(r => (
+                                        <option key={r.id} value={`row:${r.id}`}>{r.code || r.file.name}{r.title ? ` — ${r.title.slice(0, 40)}` : ''}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {projectDrawings.length > 0 && (
+                                    <optgroup label="Existing drawings in project">
+                                      {projectDrawings.map(d => (
+                                        <option key={d.id} value={`dwg:${d.id}`}>{d.code} — {d.title.slice(0, 40)}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+                                {!locked && !c.assignedTo && <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: 2 }}>No matching drawing found — pick one</div>}
+                                {!locked && existingTarget?.crsData && <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: 2 }}>Replaces this drawing's current CRS</div>}
+                              </td>
+                              <td style={{ fontSize: '12px', width: 190 }}>
+                                {c.status === 'uploading' && <span style={{ color: 'var(--primary-light)', display: 'flex', gap: 4, alignItems: 'center' }}><Loader2 size={12} className="spin" /> Uploading…</span>}
+                                {c.status === 'done' && <span style={{ color: 'var(--success)', display: 'flex', gap: 4, alignItems: 'center' }}><CheckCircle2 size={12} /> {c.message}</span>}
+                                {c.status === 'error' && <span style={{ color: 'var(--error)', display: 'flex', gap: 4, alignItems: 'center' }}><AlertCircle size={12} /> {c.message}</span>}
+                                {c.status === 'skipped' && <span style={{ color: 'var(--text-muted)' }}>{c.message}</span>}
+                                {c.status === 'ready' && c.assignedTo && <span style={{ color: 'var(--text-muted)' }}>→ {crsTargetLabel(c.assignedTo)}</span>}
+                              </td>
+                              <td style={{ width: 32 }}>
+                                {!locked && (
+                                  <button className="btn btn-ghost btn-icon" title="Remove" style={{ padding: 2 }}
+                                    onClick={() => setCrsFiles(prev => prev.filter(x => x.id !== c.id))}>
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -332,12 +476,12 @@ export function BulkUploadModal({ project, onClose, onDone }) {
           ) : (
             <>
               <button className="btn btn-secondary" onClick={onClose} disabled={running}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleUploadAll} disabled={running || analyzing || included.length === 0}>
+              <button className="btn btn-primary" onClick={handleUploadAll} disabled={running || analyzing || (included.length === 0 && crsAssigned === 0)}>
                 {running
                   ? <><div className="spinner" style={{ width: 14, height: 14 }} /><span>Uploading…</span></>
                   : analyzing
                     ? <span>Reading files…</span>
-                    : <><Upload size={14} /><span>Upload {included.length} drawing{included.length === 1 ? '' : 's'}</span></>}
+                    : <><Upload size={14} /><span>Upload {included.length} drawing{included.length === 1 ? '' : 's'}{crsAssigned ? ` + ${crsAssigned} CRS` : ''}</span></>}
               </button>
             </>
           )}

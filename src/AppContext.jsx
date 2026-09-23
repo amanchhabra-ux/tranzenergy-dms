@@ -1,4 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
+import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel } from './utils/crs';
+import { uploadCrsFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
 
@@ -17,6 +19,11 @@ const SEED_DRAWINGS = [];
 const DEFAULT_DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural', 'Other'];
 // Always keep an "Other" bucket for drawings that don't fit a discipline
 const withOther = (list) => (list && list.length ? (list.includes('Other') ? list : [...list, 'Other']) : DEFAULT_DISCIPLINES);
+// Mark a drawing's CRS as changed so the Excel gets rewritten.
+// `force` also creates an Excel when the drawing has none yet (changes made in the CRS panel).
+const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
+const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
+
 // Unique ids — Date.now() alone collides when many items are created at once (bulk upload)
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
@@ -240,6 +247,8 @@ export function AppProvider({ children }) {
       projDrawings.forEach(dwg => {
         if (dwg.pdfData) deleteBlobUrl(dwg.pdfData);
         (dwg.versions || []).forEach(v => { if (v.pdfData) deleteBlobUrl(v.pdfData); });
+        if (dwg.crsData) deleteBlobUrl(dwg.crsData);
+        if (dwg.crsPdf) deleteBlobUrl(dwg.crsPdf);
       });
       return prev.filter(d => d.projectId !== id);
     });
@@ -321,16 +330,112 @@ export function AppProvider({ children }) {
         // Each drawing has a unique blob path, so always safe to delete
         if (dwg.pdfData) deleteBlobUrl(dwg.pdfData);
         (dwg.versions || []).forEach(v => { if (v.pdfData) deleteBlobUrl(v.pdfData); });
+        if (dwg.crsData) deleteBlobUrl(dwg.crsData);
+        if (dwg.crsPdf) deleteBlobUrl(dwg.crsPdf);
         addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
       }
       return prev.filter(d => d.id !== id);
     });
   };
 
-  const uploadCRS = (drawingId, crsData) => {
+  // parsed (optional) = { meta, comments } from utils/crs readCrs(): imports the
+  // Excel's comments into the auto CRS and fills blank drawing fields from it.
+  const uploadCRS = (drawingId, crsData, parsed, fileName) => {
     if (!canDo('upload')) return;
-    setDrawings(prev => prev.map(d => d.id === drawingId ? { ...d, crsData } : d));
-    addLog(`Uploaded Comment Resolution Sheet for drawing.`);
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      if (parsed?.fileType === 'pdf') {
+        // a signed/scanned CRS in PDF form: keep it for viewing, the Excel CRS stays as is
+        if (d.crsPdf && d.crsPdf !== crsData) deleteBlobUrl(d.crsPdf);
+        addLog(`CRS (PDF) uploaded for <strong>${d.code}</strong>.`);
+        return { ...d, crsPdf: crsData };
+      }
+      if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData); // replaced file
+      addLog(`CRS uploaded for <strong>${d.code}</strong>.`);
+      if (!parsed) return { ...d, crsData };
+      return {
+        ...d,
+        ...crsFieldUpdates(d, parsed.meta || {}),
+        crsData,
+        crsImported: parsed.comments || [],
+        crsMeta: parsed.meta || {},
+        crsLayout: parsed.layout || null,
+        crsFileType: parsed.fileType || 'excel',
+        crsRowMap: pinRowMapFromImport(d, parsed.comments || []),
+        crsFileName: fileName || d.crsFileName || null,
+        crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
+      };
+    }));
+  };
+
+  // Comments added/edited in the CRS panel (not tied to a pin)
+  const updateCrsItems = (drawingId, updater) => {
+    if (!canDo('upload')) return;
+    setDrawings(prev => prev.map(d => (d.id === drawingId ? bumpCrs({ ...d, crsImported: updater(d.crsImported || []) }, true) : d)));
+  };
+
+  // Set a pin's status from the CRS: 'Open' | 'Resolved' | 'Accepted'
+  const setPinStatus = (drawingId, pinId, status) => {
+    if (!canDo(status === 'Accepted' ? 'approve' : 'upload')) return;
+    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs({
+      ...d,
+      pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }),
+    }, true)));
+  };
+
+  // The CRS Excel was rewritten with the latest comments: swap in the new file quietly
+  const saveCrsSync = (drawingId, { crsData, crsRowMap, crsLayout, rev, created, fileName }) => {
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData);
+      return {
+        ...d, crsData, crsRowMap, crsLayout,
+        crsFileName: d.crsFileName || fileName,
+        crsFileType: created ? 'excel' : d.crsFileType,
+        crsSyncedRev: Math.max(d.crsSyncedRev || 0, rev),
+        crsSyncError: null,
+        crsSyncedAt: new Date().toISOString(),
+      };
+    }));
+  };
+
+  // ─── CRS → Excel sync ──────────────────────────────────────────────────────
+  // Any drawing whose CRS changed (reply, status, new comment, pin comment) gets
+  // its Excel rewritten here, one at a time. Because the "needs sync" marker is
+  // saved with the drawing, a change is never lost to a reload or a view switch.
+  const drawingsRef = React.useRef(drawings);
+  drawingsRef.current = drawings;
+  const syncBusy = React.useRef(false);
+  const [syncKick, setSyncKick] = useState(0);
+  const pendingSync = drawings.filter(crsNeedsSync).map(d => `${d.id}:${d.crsRev}`).join('|');
+  useEffect(() => {
+    if (loading || !pendingSync || !canDo('upload') || syncBusy.current) return;
+    const t = setTimeout(async () => {
+      const d = drawingsRef.current.find(crsNeedsSync);
+      if (!d) return;
+      syncBusy.current = true;
+      const rev = d.crsRev || 0;
+      try {
+        const res = await syncCrsExcel(d, projects.find(p => p.id === d.projectId));
+        const fileName = d.crsFileName || `${d.code}_CRS.xlsx`;
+        const file = new File([res.bytes], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = await uploadCrsFile(d.code, file);
+        saveCrsSync(d.id, { crsData: url, crsRowMap: res.rowMap, crsLayout: res.layout, rev, created: res.created, fileName });
+      } catch (err) {
+        console.error('CRS Excel update failed', err);
+        // stop retrying this revision; the next change (or Retry) tries again
+        setDrawings(prev => prev.map(x => x.id === d.id ? { ...x, crsSyncError: err.message || 'Update failed', crsSyncedRev: Math.max(x.crsSyncedRev || 0, rev) } : x));
+      } finally {
+        syncBusy.current = false;
+        setSyncKick(k => k + 1); // pick up anything that changed meanwhile
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSync, loading, syncKick, currentUser]);
+
+  const retryCrsSync = (drawingId) => {
+    setDrawings(prev => prev.map(d => d.id === drawingId ? { ...d, crsRev: (d.crsSyncedRev || 0) + 1, crsSyncError: null } : d));
   };
 
   // ─── Revision Upload ───────────────────────────────────────────────────────
@@ -395,7 +500,7 @@ export function AppProvider({ children }) {
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return {
+      return bumpCrs({
         ...dwg,
         pins: (dwg.pins || []).map(pin => {
           if (pin.id !== pinId) return pin;
@@ -408,7 +513,7 @@ export function AppProvider({ children }) {
           };
           return { ...pin, comments: [...pin.comments, comment] };
         })
-      };
+      });
     }));
   }, [currentUser, canDo]);
 
@@ -416,7 +521,7 @@ export function AppProvider({ children }) {
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) };
+      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) });
     }));
   }, [canDo]);
 
@@ -424,7 +529,7 @@ export function AppProvider({ children }) {
     if (!canDo('approve')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) };
+      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) });
     }));
   }, [canDo]);
 
@@ -500,7 +605,7 @@ export function AppProvider({ children }) {
       // Drawings
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
       moveDrawingToDiscipline,
-      uploadRevision, setDrawingStatus, uploadCRS,
+      uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Users

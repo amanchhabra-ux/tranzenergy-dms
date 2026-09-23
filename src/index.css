@@ -29,6 +29,7 @@
   --bg-sidebar:     #080d1a;
   --bg-header:      rgba(10,15,30,0.95);
   --bg-modal:       #0f1828;
+  --bg-elevated:    #131c2e;
   --bg-input:       rgba(255,255,255,0.04);
 
   /* Borders */
@@ -575,7 +576,9 @@ textarea.form-input { resize: vertical; min-height: 80px; line-height: 1.5; }
 }
 .modal-close:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
 
-.modal-body { padding: 22px; overflow-y: auto; flex: 1; }
+.modal-body { padding: 22px; overflow-y: auto; flex: 1; min-height: 0; }
+/* Modals whose body + footer sit inside a <form>: let the body scroll and keep the footer (submit button) visible */
+.modal > form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -1424,3 +1427,21 @@ textarea.form-input { resize: vertical; min-height: 80px; line-height: 1.5; }
 /* spinning icon (bulk upload) */
 @keyframes spin-icon { to { transform: rotate(360deg); } }
 .spin { animation: spin-icon 1s linear infinite; }
+
+/* drag handles between resizable panels */
+.resize-handle {
+  flex: 0 0 7px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+  border-left: 1px solid var(--border);
+  z-index: 5;
+  transition: background var(--t-fast, 0.15s);
+}
+.resize-handle:hover, .resize-handle:active { background: var(--primary-glow); }
+.resize-grip {
+  position: absolute; top: 50%; left: 1px; transform: translateY(-50%);
+  width: 3px; height: 36px; border-radius: 3px;
+  background: var(--border-hover);
+}
+.resize-handle:hover .resize-grip { background: var(--primary-light); }

@@ -172,3 +172,29 @@ export function extractDrawingInfo(fileName = '', fullText = '') {
   const title = textTitle || (fnLooksLikeCode ? fnTitle : '') || nameNoRev.replace(/[_]+/g, ' ').trim();
   return { code, title, rev };
 }
+
+// ─── CRS (Comment Resolution Sheet) matching ────────────────────────────────
+export const isExcelFile = (name = '') => /\.(xlsx|xls|xlsm)$/i.test(name);
+
+const norm = (s = '') => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const CRS_WORDS = /\b(CRS|COMMENTS?|RESOLUTION|RESPONSE|REPLY|SHEET|COMPLIANCE|REV(?:ISION)?[.\s]?\d{0,2}|R\d{1,2})\b/gi;
+
+/**
+ * Find which drawing an Excel CRS file belongs to.
+ * candidates: [{ key, code, fileName? }] — returns the best key or null.
+ */
+export function matchCrsToDrawing(excelName, candidates) {
+  const base = excelName.replace(/\.[a-z0-9]+$/i, '');
+  const nBase = norm(base);
+  const nStripped = norm(base.replace(/[_-]+/g, ' ').replace(CRS_WORDS, ' '));
+  let best = null, bestLen = 0;
+  for (const c of candidates) {
+    const nCode = norm(c.code);
+    const nFile = norm((c.fileName || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').replace(CRS_WORDS, ' '));
+    // same file name apart from "CRS"/revision words
+    if (nFile && nStripped && nFile === nStripped) return c.key;
+    // drawing number appears in the Excel file name
+    if (nCode.length >= 5 && nBase.includes(nCode) && nCode.length > bestLen) { best = c.key; bestLen = nCode.length; }
+  }
+  return best;
+}

@@ -15,6 +15,8 @@ export default async function handler(req, res) {
             'application/pdf',
             'application/vnd.ms-excel',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel.sheet.macroEnabled.12',
+            'application/octet-stream',
             'image/png', 'image/jpeg', 'image/webp',
           ],
           addRandomSuffix: false,

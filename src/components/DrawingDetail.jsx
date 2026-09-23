@@ -1,10 +1,13 @@
 import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
-import { ExcelViewer } from './ExcelViewer';
 import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { uploadFile } from '../utils/uploadFile';
+import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
+import { CrsPicker } from './CrsPicker';
+import { CrsPanel } from './CrsPanel';
+import { ResizeHandle } from './ResizeHandle';
+import { readCrs, downloadCrs } from '../utils/crs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -28,33 +31,56 @@ const DISCIPLINE_COLORS = {
 };
 
 export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
-  const { drawings, currentUser, canDo, uploadRevision, setDrawingStatus, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, STATUSES, DISCIPLINES, moveDrawingToDiscipline } = useContext(AppContext);
+  const { drawings, projects, currentUser, canDo, uploadRevision, setDrawingStatus, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, STATUSES, DISCIPLINES, moveDrawingToDiscipline } = useContext(AppContext);
 
   const drawing = drawings.find(d => d.id === drawingId);
 
   const [activeVersion, setActiveVersion] = useState(null); // null = latest
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showComments, setShowComments] = useState(true);
+  // Panel sizes (px), remembered per browser
+  const readSize = (k, d) => { try { const v = parseInt(localStorage.getItem(k), 10); return Number.isFinite(v) ? v : d; } catch { return d; } };
+  const saveSize = (k, v) => { try { localStorage.setItem(k, String(Math.round(v))); } catch { /* storage unavailable */ } };
+  const DEFAULT_CRS_W = 520, DEFAULT_COMMENTS_W = 300;
+  const [crsWidth, setCrsWidth] = useState(() => readSize('dms_crs_width', DEFAULT_CRS_W));
+  const [commentsWidth, setCommentsWidth] = useState(() => readSize('dms_comments_width', DEFAULT_COMMENTS_W));
+  const dragStart = useRef(0);
+  const bodyRef = useRef(null);
   const [activePinId, setActivePinId] = useState(null);
   const [pinMode, setPinMode] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentType, setCommentType] = useState('internal');
   const [newPinId, setNewPinId] = useState(null);
-  const [activeView, setActiveView] = useState('pdf');
+  const [activeView, setActiveView] = useState('split'); // 'pdf' | 'crs' | 'split'
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
 
-  const handleCrsUpload = (e) => {
+  const handleCrsUpload = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      uploadCRS(drawing.id, ev.target.result);
-      setActiveView('crs');
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+    try {
+      const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, file), readCrs(file)]);
+      uploadCRS(drawing.id, url, parsed, file.name);
+      setActiveView('split');
+    } catch (err) {
+      console.error(err);
+      alert('⚠️ CRS upload failed: ' + err.message);
+    }
+  };
+
+  // Edited CRS from the in-app Excel viewer → save as a file, not inline data
+  const handleCrsSave = async (dataUri) => {
+    try {
+      const blob = await (await fetch(dataUri)).blob();
+      const file = new File([blob], drawing.crsFileName || `${drawing.code}_CRS.xlsx`, { type: blob.type });
+      const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, file), readCrs(file)]);
+      uploadCRS(drawing.id, url, parsed, file.name);
+    } catch (err) {
+      console.error(err);
+      alert('⚠️ Could not save CRS: ' + err.message);
+    }
   };
 
   if (!drawing) {
@@ -108,11 +134,13 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
     a.download = `${drawing.code}_${displayVersion?.version || 'R0'}.pdf`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
 
-    if (drawing.crsData) {
+    if (!drawing.crsData && (drawing.pins?.length || drawing.crsImported?.length)) {
+      setTimeout(() => downloadCrs(drawing, projects.find(p => p.id === drawing.projectId)), 300);
+    } else if (drawing.crsData) {
       setTimeout(() => {
         const crsA = document.createElement('a');
         crsA.href = drawing.crsData;
-        crsA.download = `${drawing.code}_CRS.xlsx`;
+        crsA.download = drawing.crsFileName || `${drawing.code}_CRS.xlsx`;
         document.body.appendChild(crsA); crsA.click(); document.body.removeChild(crsA);
       }, 300);
     }
@@ -291,7 +319,14 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           style={{ borderRadius: 0, background: activeView === 'crs' ? 'var(--primary-glow)' : 'transparent', border: 'none', borderLeft: '1px solid var(--border)', color: activeView === 'crs' ? 'var(--primary-light)' : 'var(--text-muted)', borderBottom: activeView === 'crs' ? '2px solid var(--primary-light)' : '2px solid transparent', padding: '10px 16px' }}
           onClick={() => setActiveView('crs')}
         >
-          CRS Excel {drawing.crsData && '✓'}
+          CRS {drawing.crsData && '✓'}
+        </button>
+        <button
+          className="btn btn-sm"
+          style={{ borderRadius: 0, background: activeView === 'split' ? 'var(--primary-glow)' : 'transparent', border: 'none', borderLeft: '1px solid var(--border)', color: activeView === 'split' ? 'var(--primary-light)' : 'var(--text-muted)', borderBottom: activeView === 'split' ? '2px solid var(--primary-light)' : '2px solid transparent', padding: '10px 16px' }}
+          onClick={() => setActiveView('split')}
+        >
+          Side by side
         </button>
       </div>
       <div className="drawing-body">
@@ -305,25 +340,75 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
         )}
 
         {/* Viewer */}
-        <div className="pdf-panel">
-          {activeView === 'pdf' ? (
-            <PdfViewer
-              pdfDataUrl={pdfSrc}
-              pins={drawing.pins || []}
-              onCanvasClick={pinMode ? handlePdfClick : undefined}
+        <div className="pdf-panel" ref={bodyRef}>
+          {activeView === 'crs' ? (
+            <CrsPanel
+              drawing={drawing}
               activePinId={activePinId}
-              showPins={true}
+              onSelectPin={setActivePinId}
+              onSaveUploaded={handleCrsSave}
             />
           ) : (
-            <ExcelViewer crsData={drawing.crsData} onSave={(data) => uploadCRS(drawing.id, data)} />
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+              <div style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                <PdfViewer
+                  key={activeView}
+                  pdfDataUrl={pdfSrc}
+                  pins={drawing.pins || []}
+                  onCanvasClick={pinMode ? handlePdfClick : undefined}
+                  activePinId={activePinId}
+                  showPins={true}
+                />
+              </div>
+              {activeView === 'split' && (
+                <ResizeHandle
+                  onDragStart={() => { dragStart.current = crsWidth; }}
+                  onDrag={dx => {
+                    const max = (bodyRef.current?.clientWidth || 1200) - 220;
+                    setCrsWidth(Math.max(300, Math.min(max, dragStart.current - dx)));
+                  }}
+                  onDragEnd={() => setCrsWidth(w => { saveSize('dms_crs_width', w); return w; })}
+                  onReset={() => { setCrsWidth(DEFAULT_CRS_W); saveSize('dms_crs_width', DEFAULT_CRS_W); }}
+                  title="Drag to resize the CRS · double-click to reset"
+                />
+              )}
+              {activeView === 'split' && (
+                <div style={{ flex: `0 0 ${crsWidth}px`, maxWidth: 'calc(100% - 207px)', minWidth: 300, display: 'flex', flexDirection: 'column' }}>
+                  <CrsPanel
+                    compact
+                    drawing={drawing}
+                    activePinId={activePinId}
+                    onSelectPin={setActivePinId}
+                    onSaveUploaded={handleCrsSave}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Comments panel */}
+        {/* Comments panel (drag its edge to resize; drag far right to hide) */}
         {showComments && (
-        <div className="comment-panel">
+          <ResizeHandle
+            onDragStart={() => { dragStart.current = commentsWidth; }}
+            onDrag={dx => setCommentsWidth(Math.max(120, Math.min(640, dragStart.current - dx)))}
+            onDragEnd={() => setCommentsWidth(w => {
+              if (w < 200) { setShowComments(false); saveSize('dms_comments_width', DEFAULT_COMMENTS_W); return DEFAULT_COMMENTS_W; }
+              saveSize('dms_comments_width', w); return w;
+            })}
+            onReset={() => { setCommentsWidth(DEFAULT_COMMENTS_W); saveSize('dms_comments_width', DEFAULT_COMMENTS_W); }}
+            title="Drag to resize comments · drag right to hide · double-click to reset"
+          />
+        )}
+        {showComments && (
+        <div className="comment-panel" style={{ width: commentsWidth, borderLeft: 'none' }}>
           <div className="comment-panel-header">
-            <span>Comments</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Comments
+              <button className="btn btn-ghost btn-icon" title="Hide comments (show again with the speech-bubble icon above)" style={{ padding: 2 }} onClick={() => setShowComments(false)}>
+                <X size={13} />
+              </button>
+            </span>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 400 }}>
               {drawing.pins?.length || 0} pin{drawing.pins?.length !== 1 ? 's' : ''}
             </span>
@@ -451,6 +536,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           onClose={() => setShowUploadModal(false)}
           onUploaded={() => setShowUploadModal(false)}
           uploadRevision={uploadRevision}
+          uploadCRS={uploadCRS}
           STATUSES={STATUSES}
           currentVersion={drawing.currentVersion}
         />
@@ -460,8 +546,9 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
 }
 
 // ─── Upload Revision Modal ──────────────────────────────────────────────────
-function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STATUSES, currentVersion }) {
+function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, uploadCRS, STATUSES, currentVersion }) {
   const [pdfFile, setPdfFile] = useState(null);
+  const [crsFile, setCrsFile] = useState(null);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
   const [summary, setSummary] = useState('');
   const [status, setStatus] = useState(drawing.status);
@@ -570,6 +657,13 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
       const blob = await uploadFile(blobPath, pdfFile);
       
       uploadRevision(drawing.id, summary, blob.url, status);
+      if (crsFile) {
+        try {
+          const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, crsFile), readCrs(crsFile)]);
+          uploadCRS(drawing.id, url, parsed, crsFile.name);
+        }
+        catch (err) { alert('⚠️ Revision saved, but the CRS upload failed: ' + err.message); }
+      }
       setUploading(false);
       onUploaded();
     } catch (err) {
@@ -636,6 +730,8 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, STA
               {!parsed.dwgNo && !parsed.title && !parsed.rev && <span style={{ color: 'var(--text-muted)' }}>No structured data found in PDF title block.</span>}
             </div>
           )}
+
+          <CrsPicker file={crsFile} onChange={setCrsFile} />
 
           <div className="divider" />
 
