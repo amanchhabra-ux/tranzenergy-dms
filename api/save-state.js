@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       allowOverwrite: true,
       contentType: 'application/json',
     };
-    if (etag) opts.ifMatch = etag;
+    if (etag) opts.ifMatch = String(etag).replace(/^W\//, '');
     const blob = await put(PATH, JSON.stringify(state), opts);
     res.setHeader('x-state-etag', blob.etag || '');
     return res.status(200).json({ success: true, etag: blob.etag || null });
