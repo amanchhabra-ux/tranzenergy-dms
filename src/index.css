@@ -1420,3 +1420,7 @@ textarea.form-input { resize: vertical; min-height: 80px; line-height: 1.5; }
   :root { --sidebar-w: 200px; }
   .login-right { display: none; }
 }
+
+/* spinning icon (bulk upload) */
+@keyframes spin-icon { to { transform: rotate(360deg); } }
+.spin { animation: spin-icon 1s linear infinite; }

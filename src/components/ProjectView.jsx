@@ -2,9 +2,11 @@ import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
-import { Plus, Search, Upload, X, FileCheck2, FolderInput } from 'lucide-react';
+import { BulkUploadModal } from './BulkUploadModal';
+import { classifyDrawing } from '../utils/drawingClassifier';
+import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { upload } from '@vercel/blob/client';
+import { uploadFile } from '../utils/uploadFile';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -18,6 +20,7 @@ const DISCIPLINE_COLORS = {
   'SCADA & Telecom':     '#06b6d4',
   'Protection & Control':'#8b5cf6',
   'Structural':          '#ec4899',
+  'Other':               '#94a3b8',
 };
 
 const STATUS_COLORS = {
@@ -37,6 +40,7 @@ export function ProjectView({ projectId, onBack }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeDrawingId, setActiveDrawingId] = useState(projectDrawings[0]?.id || null);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -101,9 +105,14 @@ export function ProjectView({ projectId, onBack }) {
           </div>
         </div>
         {canDo('upload') && (
-          <button className="btn btn-primary btn-sm" onClick={() => setShowRegisterModal(true)}>
-            <Plus size={14} /><span>Register Drawing</span>
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkModal(true)}>
+              <UploadCloud size={14} /><span>Bulk Upload</span>
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowRegisterModal(true)}>
+              <Plus size={14} /><span>Register Drawing</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -186,6 +195,11 @@ export function ProjectView({ projectId, onBack }) {
                       <div className="drawing-item-title truncate">{dwg.title}</div>
                       <div className="drawing-item-meta">
                         <span className="rev-badge">{dwg.currentVersion}</span>
+                        {activeTab === 'all' && (
+                          <span style={{ fontSize: '10px', fontWeight: 600, color: DISCIPLINE_COLORS[dwg.discipline] || 'var(--text-muted)' }}>
+                            {dwg.discipline}
+                          </span>
+                        )}
                         <span style={{ fontSize: '10px', fontWeight: 700, color: STATUS_COLORS[dwg.status] || 'var(--text-muted)' }}>
                           {dwg.status}
                         </span>
@@ -273,6 +287,15 @@ export function ProjectView({ projectId, onBack }) {
         />
       )}
 
+      {/* Bulk upload modal */}
+      {showBulkModal && (
+        <BulkUploadModal
+          project={project}
+          onClose={() => setShowBulkModal(false)}
+          onDone={() => { setShowBulkModal(false); setActiveTab('all'); }}
+        />
+      )}
+
       {/* Add Category Modal */}
       {showAddCategoryModal && (
         <div className="modal-overlay">
@@ -321,14 +344,9 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
   const fileRef = useRef(null);
   const pdfBufferRef = useRef(null);  // stores raw ArrayBuffer for reuse
 
-  const inferCategory = (code) => {
-    const c = (code || '').toUpperCase();
-    if (c.includes('-E-') || c.startsWith('E-')) return 'Electrical';
-    if (c.includes('-C-') || c.startsWith('C-')) return 'Civil';
-    if (c.includes('-M-') || c.startsWith('M-')) return 'Mechanical';
-    if (c.includes('-S-') || c.includes('-T-') || c.startsWith('S-')) return 'SCADA & Telecom';
-    if (c.includes('-P-') || c.startsWith('P-')) return 'Protection & Control';
-    return null;
+  const inferCategory = (code, fileName = '', title = '', text = '') => {
+    const r = classifyDrawing({ code, fileName, title, text, categories: DISCIPLINES });
+    return r.confidence === 'low' && r.category === 'Other' ? null : r.category;
   };
 
   const handleFile = (file) => {
@@ -506,7 +524,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       if (extractedDesc) setDesc(extractedDesc);
 
       // Infer discipline from code
-      const inf = inferCategory(finalCode || fnCode);
+      const inf = inferCategory(finalCode || fnCode, pdfFile.name, finalTitle, fullText);
       if (inf) setDiscipline(inf);
 
       // Build status message
@@ -538,10 +556,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       setUploading(true);
       try {
         const blobPath = `drawings/${code.trim().toUpperCase()}/${pdfFile.name}`;
-        const blob = await upload(blobPath, pdfFile, {
-          access: 'public',
-          handleUploadUrl: '/api/upload',
-        });
+        const blob = await uploadFile(blobPath, pdfFile);
         uploadedUrl = blob.url;
       } catch (err) {
         console.error(err);

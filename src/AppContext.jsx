@@ -14,7 +14,11 @@ const SEED_USERS = [
 const SEED_PROJECTS = [];
 const SEED_DRAWINGS = [];
 
-const DEFAULT_DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural'];
+const DEFAULT_DISCIPLINES = ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural', 'Other'];
+// Always keep an "Other" bucket for drawings that don't fit a discipline
+const withOther = (list) => (list && list.length ? (list.includes('Other') ? list : [...list, 'Other']) : DEFAULT_DISCIPLINES);
+// Unique ids — Date.now() alone collides when many items are created at once (bulk upload)
+const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
 const STATUSES = ['IFA', 'AFC', 'Superseded'];
 const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
@@ -87,7 +91,7 @@ export function AppProvider({ children }) {
   const [drawings,    setDrawings]    = useState(saved?.drawings    || SEED_DRAWINGS);
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
-  const [disciplines, setDisciplines] = useState(saved?.disciplines || DEFAULT_DISCIPLINES);
+  const [disciplines, setDisciplines] = useState(withOther(saved?.disciplines));
 
   // Fetch initial state from Vercel Blob cloud database on mount
   useEffect(() => {
@@ -102,7 +106,7 @@ export function AppProvider({ children }) {
             if (cloud.drawings) setDrawings(cloud.drawings);
             if (cloud.proposals) setProposals(cloud.proposals || []);
             if (cloud.activityLog) setActivityLog(cloud.activityLog || []);
-            if (cloud.disciplines) setDisciplines(cloud.disciplines || DEFAULT_DISCIPLINES);
+            if (cloud.disciplines) setDisciplines(withOther(cloud.disciplines));
             console.log("✓ Cloud database loaded successfully");
           } else {
             console.log("No cloud database found. Initializing clean workspace...");
@@ -182,7 +186,7 @@ export function AppProvider({ children }) {
   // ─── Activity Log ──────────────────────────────────────────────────────────
   const addLog = useCallback((message, authorName) => {
     setActivityLog(prev => [{
-      id: `log-${Date.now()}`,
+      id: uid('log'),
       message,
       author: authorName || currentUser?.name || 'System',
       time: new Date().toISOString()
@@ -259,7 +263,7 @@ export function AppProvider({ children }) {
 
     const startVer = data.initialVersion || 'R0';
     const dwg = {
-      id: `dwg-${Date.now()}`,
+      id: uid('dwg'),
       code: (data.code || '').toUpperCase().trim(),
       title: data.title || 'Untitled Drawing',
       description: data.description || '',
@@ -477,7 +481,7 @@ export function AppProvider({ children }) {
     if (data.drawings) setDrawings(data.drawings);
     if (data.proposals) setProposals(data.proposals);
     if (data.activityLog) setActivityLog(data.activityLog);
-    if (data.disciplines) setDisciplines(data.disciplines);
+    if (data.disciplines) setDisciplines(withOther(data.disciplines));
     addLog('Workspace data imported successfully.', currentUser?.name || 'System');
   };
 

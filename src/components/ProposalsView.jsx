@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../AppContext';
 import { FileText, Plus, X, Upload, Calendar, Trash2, Download } from 'lucide-react';
 import { PdfViewer } from './PdfViewer';
-import { upload } from '@vercel/blob/client';
+import { uploadFile } from '../utils/uploadFile';
 
 export function ProposalsView() {
   const { proposals, uploadProposal, updateProposalComments, deleteProposal } = useContext(AppContext);
@@ -42,10 +42,7 @@ export function ProposalsView() {
     try {
       const safeName = (newProposal.title || 'proposal').trim().replace(/\s+/g, '_').toUpperCase();
       const blobPath = `proposals/${safeName}/${fileName}`;
-      const blob = await upload(blobPath, fileData, {
-        access: 'public',
-        handleUploadUrl: '/api/upload',
-      });
+      const blob = await uploadFile(blobPath, fileData);
       
       uploadProposal({ ...newProposal, fileData: blob.url, fileName, followUpComments: '' });
       setShowUploadModal(false);
