@@ -1,8 +1,8 @@
-import { put, BlobPreconditionFailedError } from '@vercel/blob';
+import fs from 'node:fs';
+import path from 'node:path';
+import { putText, PreconditionFailed } from './_lib/r2.js';
 import { requireUser } from './_lib/auth.js';
-import { forgetMembers } from './_lib/state.js';
-
-const PATH = 'db_state_v5.json';
+import { forgetMembers, STATE_KEY } from './_lib/state.js';
 
 // Body: { state, etag } — etag is the version the client last loaded
 // (null only when creating the database for the first time).
@@ -27,19 +27,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const opts = {
-      access: 'private',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: 'application/json',
-    };
-    if (etag) opts.ifMatch = String(etag).replace(/^W\//, '');
-    const blob = await put(PATH, JSON.stringify(state), opts);
+    let newEtag = null;
+    if (process.env.LOCAL_DATA_DIR) {
+      fs.mkdirSync(process.env.LOCAL_DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(process.env.LOCAL_DATA_DIR, 'db_state.json'), JSON.stringify(state));
+    } else {
+      // etag given → only if nobody saved since; no etag → only when creating the workspace
+      newEtag = await putText(STATE_KEY, JSON.stringify(state), etag ? { ifMatch: etag } : { create: true });
+    }
     forgetMembers();
-    res.setHeader('x-state-etag', blob.etag || '');
-    return res.status(200).json({ success: true, etag: blob.etag || null });
+    res.setHeader('x-state-etag', newEtag || '');
+    return res.status(200).json({ success: true, etag: newEtag });
   } catch (error) {
-    if (error instanceof BlobPreconditionFailedError || error?.name === 'BlobPreconditionFailedError') {
+    if (error instanceof PreconditionFailed) {
       return res.status(409).json({ error: 'conflict', message: 'The workspace was changed by someone else.' });
     }
     console.error('Error saving state:', error);

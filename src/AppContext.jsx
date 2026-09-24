@@ -31,6 +31,12 @@ const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15
   '#ea580c': '#3f7d3a', '#c2410c': '#2f6a2f', '#27272a': '#2a4439', '#18181b': '#1f2d27', '#f97316': '#5a9a44' };
 const recolorUsers = (list) => (list || []).map(u => (OLD_AVATAR[u.color] ? { ...u, color: OLD_AVATAR[u.color] } : u));
 
+// Union of two user lists by email (first list wins on conflicts)
+const mergeUsers = (a = [], b = []) => {
+  const seen = new Set(a.map(u => String(u.email || '').toLowerCase()));
+  return [...a, ...b.filter(u => !seen.has(String(u.email || '').toLowerCase()))];
+};
+
 // Unique ids — Date.now() alone collides when many items are created at once (bulk upload)
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
@@ -136,7 +142,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   //  1. loads it on start (never writes until that load has succeeded),
   //  2. saves its changes with the version it loaded (etag); if someone else
   //     saved in between, it merges both sets of changes and saves again,
-  //  3. checks for other people's changes every 20 s and when the tab regains focus.
+  //  3. checks for other people's changes every 30 s and when the tab regains focus.
   const [cloudStatus, setCloudStatus] = useState('connecting'); // connecting | ok | offline
   const stateRef = useRef(null);
   stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines };
@@ -210,9 +216,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     try {
       const r = await fetchCloud(cloudReady.current ? etagRef.current : undefined);
       if (r.status === 'same') { setCloudStatus('ok'); return; }
+      const hasWork = (s) => (s?.projects?.length || 0) + (s?.drawings?.length || 0) > 0;
       if (r.status === 'notFound') {
-        if (!cloudReady.current) {
-          // brand-new workspace: seed the cloud with what this browser has
+        // brand-new workspace: seed the cloud with what this browser has — but only
+        // if it actually holds projects, so an empty browser can't start a blank workspace
+        // over someone else's data (the next check tries again)
+        if (!cloudReady.current && hasWork(stripForCloud(stateRef.current))) {
           cloudReady.current = true; baseRef.current = null; etagRef.current = null;
           setCloudStatus('ok');
           pushToCloud();
@@ -220,7 +229,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         return;
       }
       const local = stripForCloud(stateRef.current);
-      const merged = cloudReady.current ? mergeState(baseRef.current, local, r.state) : r.state;
+      // First load normally takes the cloud copy. Exception: the cloud workspace is empty
+      // but this browser has work → keep ours and send it up (recovers a restored/blank store;
+      // not after an admin's deliberate Reset Workspace).
+      const wasReset = (r.state.activityLog || []).some(l => /Workspace reset/i.test(l?.message || ''));
+      const keepLocal = !cloudReady.current && !hasWork(r.state) && hasWork(local) && !wasReset;
+      const merged = cloudReady.current ? mergeState(baseRef.current, local, r.state)
+        : keepLocal ? { ...local, users: mergeUsers(r.state.users, local.users) } : r.state;
       baseRef.current = r.state;
       etagRef.current = r.etag;
       cloudReady.current = true;
@@ -258,7 +273,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Keep up with other people's changes
   useEffect(() => {
     const tick = () => { if (document.visibilityState === 'visible') pullFromCloud(); };
-    const iv = setInterval(tick, 20000);
+    const iv = setInterval(tick, 30000);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(iv); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); };

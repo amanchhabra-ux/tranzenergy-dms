@@ -54,3 +54,34 @@ export async function deleteObject(key) {
   const res = await r2().fetch(objectUrl(key), { method: 'DELETE' });
   if (!res.ok && res.status !== 404) throw new Error(`R2 delete failed (${res.status})`);
 }
+
+// ── Small JSON documents (workspace database, password store) ─────────────
+// Kept under _system/, which cleanKey() never allows, so browsers can't reach them.
+export class PreconditionFailed extends Error { constructor() { super('precondition_failed'); this.name = 'PreconditionFailed'; } }
+export const strongEtag = (e) => (e ? String(e).replace(/^W\//, '') : '');
+
+/** → { notFound } | { notModified, etag } | { text, etag } */
+export async function getText(key, { ifNoneMatch } = {}) {
+  const headers = {};
+  if (ifNoneMatch) headers['If-None-Match'] = strongEtag(ifNoneMatch);
+  const res = await r2().fetch(objectUrl(key), { method: 'GET', headers });
+  if (res.status === 404) return { notFound: true };
+  const etag = strongEtag(res.headers.get('etag'));
+  if (res.status === 304) return { notModified: true, etag };
+  if (!res.ok) throw new Error(`R2 read failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return { text: await res.text(), etag };
+}
+
+/**
+ * Write text. ifMatch: only if unchanged since that version. create: only if it doesn't exist yet.
+ * Throws PreconditionFailed when someone else wrote first. Returns the new etag.
+ */
+export async function putText(key, text, { ifMatch, create = false, contentType = 'application/json' } = {}) {
+  const headers = { 'Content-Type': contentType };
+  if (ifMatch) headers['If-Match'] = strongEtag(ifMatch);
+  else if (create) headers['If-None-Match'] = '*';
+  const res = await r2().fetch(objectUrl(key), { method: 'PUT', body: text, headers });
+  if (res.status === 412) throw new PreconditionFailed();
+  if (!res.ok) throw new Error(`R2 write failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return strongEtag(res.headers.get('etag'));
+}

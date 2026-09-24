@@ -44,10 +44,10 @@ async function sessionUser(req) {
   const s = readSession(req);
   if (!s) return null;
   // a password change/reset signs out older sessions
-  const { data } = await readCreds();
-  const rec = data.users?.[s.email];
-  if (rec && (rec.pwv || 0) !== (s.pwv || 0)) return null;
-  if (!rec && !s.bootstrap && s.pwv !== -1) return null;
+  const bad = (rec) => (rec && (rec.pwv || 0) !== (s.pwv || 0)) || (!rec && !s.bootstrap && s.pwv !== -1);
+  let rec = (await readCreds()).data.users?.[s.email];
+  if (bad(rec)) rec = (await readCreds({ fresh: true })).data.users?.[s.email]; // cache may be a few seconds old
+  if (bad(rec)) return null;
   return { email: s.email, mustChangePassword: s.pwv === -1 };
 }
 

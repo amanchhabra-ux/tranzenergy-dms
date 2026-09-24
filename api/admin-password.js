@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   if (!who) return;
   try {
     if (req.method === 'GET') {
-      const { data } = await readCreds();
+      const { data } = await readCreds({ fresh: true });
       const hasPassword = Object.fromEntries(Object.entries(data.users || {}).map(([e, r]) => [e, r.updatedAt || true]));
       return res.status(200).json({ hasPassword });
     }

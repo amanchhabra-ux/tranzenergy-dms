@@ -26,7 +26,7 @@ export default async function handler(req, res) {
       let user = (await memberMap()).get(email);
       if (!user) { forgetMembers(); user = (await memberMap()).get(email); } // just added?
       if (!user) return res.status(401).json({ error: 'Email or password is incorrect.' });
-      const { data } = await readCreds();
+      const { data } = await readCreds({ fresh: true });
       const rec = data.users?.[email];
       if (rec) {
         if (!checkPassword(password, rec)) return res.status(401).json({ error: 'Email or password is incorrect.' });
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       const email = s.email;
       const problem = passwordProblem(body.newPassword);
       if (problem) return res.status(400).json({ error: problem });
-      const { data } = await readCreds();
+      const { data } = await readCreds({ fresh: true });
       const rec = data.users?.[email];
       if (s.pwv !== -1) {
         if (!rec || (rec.pwv || 0) !== (s.pwv || 0)) return res.status(401).json({ error: 'Please sign in again.' });
