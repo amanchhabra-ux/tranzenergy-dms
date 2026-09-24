@@ -1847,12 +1847,12 @@ body.dms-focus .revision-timeline > .comments-toggle { display: inline-flex !imp
 
 /* ── Brand logo ── */
 .sidebar-brand:has(.sidebar-brand-logo) { justify-content: center; padding: 14px 16px 12px; }
-.sidebar-brand-logo { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.sidebar-brand-logo { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%;
+  transform: translateX(-10px); /* optical centre: the leaf circle weights the logo to the right */ }
 .sidebar-brand-logo img { width: 156px; max-width: 100%; height: auto; display: block; }
 .sidebar-brand-logo .sidebar-brand-sub {
-  width: 100%; text-align: center; font-size: 9.5px; font-weight: 600; letter-spacing: 1.6px;
-  text-transform: uppercase; color: var(--primary-dark);
-  padding-top: 7px; border-top: 1px solid var(--border);
+  text-align: center; font-size: 9.5px; font-weight: 700; letter-spacing: 1.8px;
+  text-transform: uppercase; color: var(--primary-dark); line-height: 1; padding-left: 1.8px; /* balance trailing letter-spacing */
 }
 .login-brand-logo { flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .login-brand-logo img { width: 210px; max-width: 70%; height: auto; display: block; }
@@ -1865,3 +1865,9 @@ body.dms-focus .revision-timeline > .comments-toggle { display: inline-flex !imp
 .btn-primary { background: linear-gradient(135deg, #4b8a3f 0%, #3f7d3a 100%); border-color: #3f7d3a; }
 .btn-primary:hover { background: linear-gradient(135deg, #3f7d3a 0%, #2f6a2f 100%); }
 .login-page-modern { background: linear-gradient(160deg, #f6faf3 0%, #ffffff 55%, #eef6e7 100%); }
+
+/* narrower sidebar (≤900px): smaller logo so it keeps breathing room */
+@media (max-width: 900px) and (min-width: 769px) {
+  .sidebar-brand-logo { transform: translateX(-8px); }
+  .sidebar-brand-logo img { width: 138px; }
+}
