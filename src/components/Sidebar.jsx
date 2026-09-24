@@ -12,7 +12,7 @@ const TYPE_META = {
   wind:         { label: 'Wind',          icon: Wind,    color: '#15803d' },
 };
 
-export function Sidebar({ activeView, activeProjectId, onNavigate }) {
+export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = false }) {
   const { currentUser, projects, drawings, canDo, logout, authMode } = useContext(AppContext);
   const [showPw, setShowPw] = React.useState(false);
 
@@ -21,7 +21,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate }) {
   const drawingCount = (pid) => drawings.filter(d => d.projectId === pid).length;
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       {/* Brand */}
       <div className="sidebar-brand">
         <div className="sidebar-brand-icon">

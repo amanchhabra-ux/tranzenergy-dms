@@ -7,6 +7,7 @@ import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
 import { CrsPanel } from './CrsPanel';
 import { ResizeHandle } from './ResizeHandle';
+import { useIsMobile } from '../utils/useIsMobile';
 import { readCrs, downloadCrs } from '../utils/crs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -53,7 +54,9 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
   const [commentText, setCommentText] = useState('');
   const [commentType, setCommentType] = useState('internal');
   const [newPinId, setNewPinId] = useState(null);
-  const [activeView, setActiveView] = useState('split'); // 'pdf' | 'crs' | 'split'
+  const [activeViewRaw, setActiveView] = useState('split'); // 'pdf' | 'crs' | 'split'
+  const isMobile = useIsMobile();
+  const activeView = isMobile && activeViewRaw === 'split' ? 'pdf' : activeViewRaw; // phones: one at a time
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
@@ -152,16 +155,24 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
       {/* Drawing header */}
       <div className="drawing-detail-header">
         <div style={{ display: 'flex', gap: 10, flex: '1 1 340px', minWidth: 0, alignItems: 'center' }}>
-          <div className="toolgroup" style={{ flexShrink: 0 }}>
-            <button className={`btn btn-ghost btn-icon ${focus ? 'on' : ''}`} onClick={() => setFocus(f => !f)} title={focus ? 'Exit focus mode (Esc)' : 'Focus mode: hide menus and lists'}>
-              {focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </button>
-            {onToggleSidebar && !focus && (
-              <button className={`btn btn-ghost btn-icon ${showSidebar ? 'on' : ''}`} onClick={onToggleSidebar} title={showSidebar ? 'Hide drawings list' : 'Show drawings list'}>
-                <PanelLeft size={15} />
+          {isMobile ? (
+            onToggleSidebar && (
+              <button className="btn btn-secondary btn-sm" onClick={onToggleSidebar} style={{ flexShrink: 0 }}>
+                <ChevronLeft size={15} /> Drawings
               </button>
-            )}
-          </div>
+            )
+          ) : (
+          <div className="toolgroup" style={{ flexShrink: 0 }}>
+              <button className={`btn btn-ghost btn-icon ${focus ? 'on' : ''}`} onClick={() => setFocus(f => !f)} title={focus ? 'Exit focus mode (Esc)' : 'Focus mode: hide menus and lists'}>
+                {focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              </button>
+              {onToggleSidebar && !focus && (
+                <button className={`btn btn-ghost btn-icon ${showSidebar ? 'on' : ''}`} onClick={onToggleSidebar} title={showSidebar ? 'Hide drawings list' : 'Show drawings list'}>
+                  <PanelLeft size={15} />
+                </button>
+              )}
+            </div>
+          )}
           <div style={{ minWidth: 0 }}>
             <span className="drawing-code-badge">{drawing.code}</span>
             <div className="drawing-title-text truncate" style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }} title={drawing.title}>{drawing.title}</div>
@@ -276,7 +287,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           <button className={activeView === 'crs' ? 'on' : ''} onClick={() => setActiveView('crs')}>
             CRS{drawing.crsData && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} title="CRS Excel attached" />}
           </button>
-          <button className={activeView === 'split' ? 'on' : ''} onClick={() => setActiveView('split')}>Side by side</button>
+          {!isMobile && <button className={activeView === 'split' ? 'on' : ''} onClick={() => setActiveView('split')}>Side by side</button>}
         </div>
         <button
           className={`comments-toggle ${showComments ? 'on' : ''}`}

@@ -8,6 +8,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
 import { AccessDenied } from './components/AccessDenied';
 import { AuthGate, clerkEnabled, Splash } from './auth';
+import { Menu, Zap } from 'lucide-react';
 import { PasswordLogin } from './components/PasswordLogin';
 import { ChangePassword } from './components/ChangePassword';
 
@@ -15,6 +16,7 @@ function AppShell() {
   const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut, needsLogin, mustChangePassword, logout } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
+  const [navOpen, setNavOpen] = React.useState(false); // phone: menu drawer
 
   if (loading) {
     return (
@@ -61,6 +63,7 @@ function AppShell() {
   if (!currentUser) return <Login />;
 
   const navigateTo = (view, projectId = null) => {
+    setNavOpen(false);
     setActiveView(view);
     if (projectId) setActiveProjectId(projectId);
   };
@@ -87,8 +90,14 @@ function AppShell() {
         activeView={activeView}
         activeProjectId={activeProjectId}
         onNavigate={navigateTo}
+        mobileOpen={navOpen}
       />
+      {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
       <div className="main-content">
+        <div className="mobile-topbar">
+          <button className="btn btn-ghost btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <div className="mobile-topbar-brand"><span className="sidebar-brand-icon" style={{ width: 26, height: 26 }}><Zap size={14} color="#fff" /></span> Tranzenergy</div>
+        </div>
         {cloudStatus === 'offline' && (
           <div style={{ background: 'var(--error-glow)', color: 'var(--error)', fontSize: 12, padding: '6px 16px', borderBottom: '1px solid rgba(239,68,68,0.3)' }}>
             ⚠️ Can't reach the shared database. Your changes are kept in this browser and will be saved when the connection is back.

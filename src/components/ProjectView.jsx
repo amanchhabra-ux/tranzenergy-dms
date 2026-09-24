@@ -4,6 +4,7 @@ import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
 import { BulkUploadModal } from './BulkUploadModal';
 import { ResizeHandle } from './ResizeHandle';
+import { useIsMobile } from '../utils/useIsMobile';
 import { classifyDrawing } from '../utils/drawingClassifier';
 import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -38,6 +39,7 @@ export function ProjectView({ projectId, onBack }) {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const isMobile = useIsMobile();
   const [listWidth, setListWidth] = useState(() => { try { return parseInt(localStorage.getItem('dms_list_width'), 10) || 280; } catch { return 280; } });
   const listDragStart = useRef(0);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
@@ -153,7 +155,7 @@ export function ProjectView({ projectId, onBack }) {
       {activeTab === 'mdl' ? (
         <MDLView projectId={projectId} />
       ) : (
-        <div className="workspace">
+        <div className={`workspace ${showSidebar ? 'list-open' : ''}`}>
           {/* Drawing list sidebar */}
           {showSidebar && (
           <div className="drawing-list-panel" style={{ width: listWidth, borderRight: 'none' }}>
@@ -186,7 +188,7 @@ export function ProjectView({ projectId, onBack }) {
                     key={dwg.id}
                     className={`drawing-item ${activeDrawingId === dwg.id ? 'active' : ''}`}
                     style={{ position: 'relative' }}
-                    onClick={() => { setActiveDrawingId(dwg.id); setMovingDrawingId(null); }}
+                    onClick={() => { setActiveDrawingId(dwg.id); setMovingDrawingId(null); if (isMobile) setShowSidebar(false); }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="drawing-item-code">{dwg.code}</div>
