@@ -22,7 +22,7 @@ export function sniffType(bytes) {
 export async function loadBytes(src) {
   if (src instanceof Uint8Array) return src;
   if (src instanceof Blob) return new Uint8Array(await src.arrayBuffer());
-  if (/^https?:\/\//.test(src)) {
+  if (/^https?:\/\//.test(src) || src.startsWith('/api/file?')) {
     const r = await fetch(src);
     if (!r.ok) throw new Error(`Could not load CRS (${r.status})`);
     return new Uint8Array(await r.arrayBuffer());

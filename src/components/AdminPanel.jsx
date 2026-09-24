@@ -1,5 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
+import { StorageMigration } from './StorageMigration';
 import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload } from 'lucide-react';
 
 const ROLE_COLORS = {
@@ -349,6 +350,8 @@ export function AdminPanel({ initialTab = 'users' }) {
                 </div>
               )}
             </div>
+
+            {currentUser?.role === 'Admin' && <StorageMigration />}
 
             {importStatus && (
               <div className="card" style={{ padding: '12px 16px', fontSize: '13px', background: importStatus.includes('successfully') ? 'var(--success-glow)' : 'rgba(239,68,68,0.1)', border: importStatus.includes('successfully') ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)', color: importStatus.includes('successfully') ? '#10b981' : '#dc2626', borderRadius: '6px', textAlign: 'center', fontWeight: 500 }}>

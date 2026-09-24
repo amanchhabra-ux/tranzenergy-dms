@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",
+    "aws4fetch": "^1.0.20",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.23.0",
     "pdfjs-dist": "^6.1.200",

@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../AppContext';
 import { FileText, Plus, X, Upload, Calendar, Trash2, Download } from 'lucide-react';
 import { PdfViewer } from './PdfViewer';
-import { uploadFile } from '../utils/uploadFile';
+import { uploadFile, isStoredFile } from '../utils/uploadFile';
 
 export function ProposalsView() {
   const { proposals, uploadProposal, updateProposalComments, deleteProposal } = useContext(AppContext);
@@ -138,7 +138,7 @@ export function ProposalsView() {
               {/* PDF Viewer */}
               <div style={{ flex: 2, borderRight: '1px solid var(--border)', background: 'var(--pdf-bg)', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {activeProposal.fileData ? (
-                  activeProposal.fileData.startsWith('http') || activeProposal.fileData.startsWith('data:application/pdf') ? (
+                  isStoredFile(activeProposal.fileData) || activeProposal.fileData.startsWith('data:application/pdf') ? (
                     <PdfViewer pdfDataUrl={activeProposal.fileData} />
                   ) : (
                     <div className="empty-state" style={{ height: '100%' }}>

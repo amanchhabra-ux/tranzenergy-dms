@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel } from './utils/crs';
-import { uploadCrsFile } from './utils/uploadFile';
+import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
 
@@ -47,7 +47,7 @@ function loadState() {
 }
 
 async function deleteBlobUrl(url) {
-  if (!url || !url.startsWith('http')) return;
+  if (!isStoredFile(url)) return;
   try {
     await fetch('/api/delete', {
       method: 'POST',
@@ -66,10 +66,10 @@ function stripForCloud(data) {
     projects: data.projects || [],
     drawings: (data.drawings || []).map(d => ({
       ...d,
-      versions: (d.versions || []).map(v => ({ ...v, pdfData: v.pdfData?.startsWith?.('http') ? v.pdfData : null })),
-      pdfData: d.pdfData?.startsWith?.('http') ? d.pdfData : null,
+      versions: (d.versions || []).map(v => ({ ...v, pdfData: isStoredFile(v.pdfData) ? v.pdfData : null })),
+      pdfData: isStoredFile(d.pdfData) ? d.pdfData : null,
     })),
-    proposals: (data.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith?.('http') ? p.fileData : null })),
+    proposals: (data.proposals || []).map(p => ({ ...p, fileData: isStoredFile(p.fileData) ? p.fileData : null })),
     activityLog: data.activityLog || [],
     disciplines: data.disciplines || [],
   };
@@ -83,10 +83,10 @@ function saveState(data) {
       ...data,
       drawings: data.drawings.map(d => ({
         ...d,
-        versions: d.versions.map(v => ({ ...v, pdfData: v.pdfData?.startsWith('http') ? v.pdfData : null })),
-        pdfData: d.pdfData?.startsWith('http') ? d.pdfData : null
+        versions: d.versions.map(v => ({ ...v, pdfData: isStoredFile(v.pdfData) ? v.pdfData : null })),
+        pdfData: isStoredFile(d.pdfData) ? d.pdfData : null
       })),
-      proposals: (data.proposals || []).map(p => ({ ...p, fileData: p.fileData?.startsWith('http') ? p.fileData : null }))
+      proposals: (data.proposals || []).map(p => ({ ...p, fileData: isStoredFile(p.fileData) ? p.fileData : null }))
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
   } catch (e) {
@@ -446,6 +446,21 @@ export function AppProvider({ children }) {
     }, true)));
   };
 
+  // ─── Storage migration: swap old file links for new ones (e.g. Vercel Blob → R2) ──
+  const replaceFileUrls = (map) => {
+    if (!canDo('admin')) return;
+    const m = (u) => (u && map[u]) || u;
+    setDrawings(prev => prev.map(d => ({
+      ...d,
+      pdfData: m(d.pdfData),
+      crsData: m(d.crsData),
+      crsPdf: m(d.crsPdf),
+      versions: (d.versions || []).map(v => ({ ...v, pdfData: m(v.pdfData) })),
+    })));
+    setProposals(prev => prev.map(p => ({ ...p, fileData: m(p.fileData) })));
+    addLog(`${Object.keys(map).length} file(s) moved to Cloudflare R2.`);
+  };
+
   // ─── Deleting comments ────────────────────────────────────────────────────
   // Who may delete: the comment's author, or a Project Manager / Admin.
   const canDeleteComment = useCallback((author) => {
@@ -719,7 +734,7 @@ export function AppProvider({ children }) {
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
       moveDrawingToDiscipline,
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
-      canDeleteComment, deletePinComment, deletePin, deleteCrsItem,
+      canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Users
