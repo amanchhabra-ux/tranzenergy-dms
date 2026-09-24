@@ -178,7 +178,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
       ) : (
         <div style={{ flex: 1, overflow: 'auto', padding: compact ? 10 : 16 }}>
           {/* Title block */}
-          <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '6px 16px', fontSize: 11, marginBottom: 12, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
+          <div className="crs-card" style={{ display: 'grid', gridTemplateColumns: compact ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '6px 16px', fontSize: 11, marginBottom: 12, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
             {[
               ['Drawing No.', drawing.code], ['Revision', drawing.currentVersion],
               ['Title', drawing.title], ['Category', drawing.discipline],
@@ -194,7 +194,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
 
           {/* New comment */}
           {canEdit && (
-            <div style={{ border: '1px dashed var(--border-hover)', borderRadius: 'var(--r-md)', padding: 8, marginBottom: 10 }}>
+            <div className="crs-card" style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: 8, marginBottom: 10 }}>
               <textarea
                 className="form-input"
                 rows={2}
@@ -230,13 +230,14 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
                 const statusValue = statuses.includes(r.status) ? r.status : r.status || 'Open';
                 return (
                   <div
+                    className="crs-card"
                     key={r.key}
                     onClick={() => r.pinId && onSelectPin?.(active ? null : r.pinId)}
                     title={r.pinId ? 'Click to highlight this pin on the drawing' : undefined}
                     style={{
                       border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`, borderRadius: 'var(--r-md)',
                       padding: '8px 10px', fontSize: 12, cursor: r.pinId ? 'pointer' : 'default',
-                      background: active ? 'var(--primary-glow)' : 'transparent',
+                      background: active ? 'var(--primary-glow)' : '#fff',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
