@@ -3,10 +3,10 @@ import { AppContext } from '../AppContext';
 import { Zap, Sun, Battery, Wind, FileText, CheckCircle, Clock, AlertCircle, Plus, ArrowRight } from 'lucide-react';
 
 const TYPE_META = {
-  transmission: { label: 'Transmission Line', color: '#27272a', icon: Zap,     cls: 'type-transmission' },
+  transmission: { label: 'Transmission Line', color: '#2a4439', icon: Zap,     cls: 'type-transmission' },
   solar:        { label: 'Solar Plant',        color: '#d97706', icon: Sun,     cls: 'type-solar' },
-  bess:         { label: 'BESS Plant',         color: '#ea580c', icon: Battery, cls: 'type-bess' },
-  wind:         { label: 'Wind Farm',          color: '#15803d', icon: Wind,    cls: 'type-wind' },
+  bess:         { label: 'BESS Plant',         color: '#3f7d3a', icon: Battery, cls: 'type-bess' },
+  wind:         { label: 'Wind Farm',          color: '#0369a1', icon: Wind,    cls: 'type-wind' },
 };
 
 export function Dashboard({ onOpenProject }) {
@@ -23,7 +23,7 @@ export function Dashboard({ onOpenProject }) {
   const openPins  = filteredDrawings.reduce((n, d) => n + (d.pins?.filter(p => !p.resolved).length || 0), 0);
 
   const stats = [
-    { label: 'Total Drawings',     value: totalDrawings, icon: FileText,    color: '#27272a' },
+    { label: 'Total Drawings',     value: totalDrawings, icon: FileText,    color: '#2a4439' },
     { label: 'Revisions',          value: revCount,      icon: Clock,       color: '#d97706' },
     { label: 'CRS Attached',        value: crsCount,      icon: CheckCircle, color: '#15803d' },
     { label: 'Open Comments',       value: openPins,      icon: AlertCircle, color: '#dc2626' },

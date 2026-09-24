@@ -84,7 +84,7 @@ function PageCanvas({ page, viewport, pageNum, pins, onCanvasClick, activePinId,
               fontSize: 9, fontWeight: 800, color: '#fff',
               boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
               background: activePinId === pin.id
-                ? '#18181b'
+                ? '#1f2d27'
                 : pin.resolved ? 'var(--success)' : 'var(--warning)',
             }}
           >

@@ -8,8 +8,8 @@ export const clerkEnabled = !!CLERK_KEY;
 
 const appearance = {
   variables: {
-    colorPrimary: '#ea580c',
-    colorText: '#18181b',
+    colorPrimary: '#3f7d3a',
+    colorText: '#1f2d27',
     colorTextSecondary: '#52525b',
     colorBackground: '#ffffff',
     borderRadius: '10px',
@@ -27,8 +27,8 @@ const appearance = {
 
 export function Splash({ text = 'Loading…' }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f5f5f4', color: '#18181b', fontFamily: 'Inter, sans-serif' }}>
-      <div style={{ width: 44, height: 44, border: '4px solid #e7e5e4', borderTopColor: '#ea580c', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 18 }} />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f4f7f2', color: '#1f2d27', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ width: 44, height: 44, border: '4px solid #e3eadf', borderTopColor: '#3f7d3a', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 18 }} />
       <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       <div style={{ fontSize: 16, fontWeight: 600 }}>TRANZENERGY DMS</div>
       <div style={{ fontSize: 12, color: '#71717a', marginTop: 6 }}>{text}</div>

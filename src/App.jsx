@@ -26,15 +26,15 @@ function AppShell() {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: '#f5f5f4',
-        color: '#18181b',
+        background: '#f4f7f2',
+        color: '#1f2d27',
         fontFamily: 'Outfit, sans-serif'
       }}>
         <div style={{
           width: '50px',
           height: '50px',
-          border: '4px solid #e7e5e4',
-          borderTopColor: '#ea580c',
+          border: '4px solid #e3eadf',
+          borderTopColor: '#3f7d3a',
           borderRadius: '50%',
           animation: 'spin 1s linear infinite',
           marginBottom: '20px'

@@ -18,9 +18,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const DISCIPLINE_COLORS = {
-  'Electrical':          '#ea580c',
+  'Electrical':          '#3f7d3a',
   'Civil':               '#a16207',
-  'Mechanical':          '#15803d',
+  'Mechanical':          '#0f766e',
   'SCADA & Telecom':     '#0369a1',
   'Protection & Control':'#7c3aed',
   'Structural':          '#be185d',
@@ -664,7 +664,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={handleAutoPopulate}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', justifyContent: 'center', background: 'var(--primary-glow)', color: 'var(--primary-dark)', border: '1px solid #fed7aa', padding: '8px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', justifyContent: 'center', background: 'var(--primary-glow)', color: 'var(--primary-dark)', border: '1px solid #cfe5b8', padding: '8px' }}
                 >
                   🔍 Auto-Populate Details from PDF
                 </button>

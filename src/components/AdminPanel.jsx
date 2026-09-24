@@ -6,11 +6,11 @@ import { UserPasswordModal, generatePassword, setUserPassword } from './UserPass
 import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound } from 'lucide-react';
 
 const ROLE_COLORS = {
-  'Admin': '#ea580c', 'Project Manager': '#27272a',
+  'Admin': '#3f7d3a', 'Project Manager': '#2a4439',
   'Senior Engineer': '#15803d', 'Engineer': '#d97706', 'Viewer': '#a1a1aa',
 };
 
-const AVATAR_COLORS = ['#ea580c','#27272a','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#c2410c','#0369a1','#52525b'];
+const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
   const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow } = useContext(AppContext);
@@ -131,8 +131,8 @@ export function AdminPanel({ initialTab = 'users' }) {
       setImportStatus('Clearing the workspace…');
       importWorkspaceData({
         users: [
-          { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#ea580c' },
-          { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#27272a' },
+          { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#3f7d3a' },
+          { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#2a4439' },
           { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#15803d' },
           { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#d97706' },
           { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#a1a1aa' },

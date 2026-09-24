@@ -62,9 +62,9 @@ export function Login() {
   };
 
   const projectTypes = [
-    { type: 'Transmission Lines', color: '#27272a', icon: '🗼' },
+    { type: 'Transmission Lines', color: '#2a4439', icon: '🗼' },
     { type: 'Solar Plants', color: '#d97706', icon: '☀️' },
-    { type: 'BESS Plants', color: '#ea580c', icon: '🔋' },
+    { type: 'BESS Plants', color: '#3f7d3a', icon: '🔋' },
     { type: 'Wind Plants', color: '#15803d', icon: '💨' },
   ];
 

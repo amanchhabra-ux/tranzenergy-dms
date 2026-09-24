@@ -7,8 +7,8 @@ export const AppContext = createContext(null);
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
-  { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#ea580c' },
-  { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#27272a' },
+  { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#3f7d3a' },
+  { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#2a4439' },
   { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#15803d' },
   { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#d97706' },
   { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#a1a1aa' },
@@ -25,8 +25,10 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
 
-// Avatar colours from the old indigo/cyan palette → charcoal + orange palette
-const OLD_AVATAR = { '#6366f1': '#ea580c', '#06b6d4': '#27272a', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#f97316': '#c2410c', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b' };
+// Avatar colours from older palettes → Tranz Energy green palette
+const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#5a9a44': '#2f6a2f', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b',
+  // charcoal + orange → Tranz Energy green
+  '#ea580c': '#3f7d3a', '#c2410c': '#2f6a2f', '#27272a': '#2a4439', '#18181b': '#1f2d27', '#f97316': '#5a9a44' };
 const recolorUsers = (list) => (list || []).map(u => (OLD_AVATAR[u.color] ? { ...u, color: OLD_AVATAR[u.color] } : u));
 
 // Unique ids — Date.now() alone collides when many items are created at once (bulk upload)
@@ -320,7 +322,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     }
     if (me?.isAdminEmail) {
       const nameGuess = me.name && me.name !== email ? me.name : email.split('@')[0];
-      const nu = { id: uid('u'), name: nameGuess, email, role: 'Admin', avatar: nameGuess.slice(0, 2).toUpperCase(), color: '#ea580c' };
+      const nu = { id: uid('u'), name: nameGuess, email, role: 'Admin', avatar: nameGuess.slice(0, 2).toUpperCase(), color: '#3f7d3a' };
       setUsers(prev => [...prev, nu]);
       setCurrentUser(nu);
       addLog(`${nu.name} added as Admin and signed in.`);
@@ -718,7 +720,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
     if (!canDo('admin')) return null;
-    const u = { id: `u-${Date.now()}`, avatar: data.name.slice(0,2).toUpperCase(), color: '#ea580c', ...data };
+    const u = { id: `u-${Date.now()}`, avatar: data.name.slice(0,2).toUpperCase(), color: '#3f7d3a', ...data };
     setUsers(prev => [...prev, u]);
     addLog(`User <strong>${u.name}</strong> added.`);
     return u;

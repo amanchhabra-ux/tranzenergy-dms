@@ -6,10 +6,10 @@ import {
   Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database, KeyRound } from 'lucide-react';
 
 const TYPE_META = {
-  transmission: { label: 'Transmission', icon: Zap,     color: '#27272a' },
+  transmission: { label: 'Transmission', icon: Zap,     color: '#2a4439' },
   solar:        { label: 'Solar',         icon: Sun,     color: '#d97706' },
-  bess:         { label: 'BESS',          icon: Battery, color: '#ea580c' },
-  wind:         { label: 'Wind',          icon: Wind,    color: '#15803d' },
+  bess:         { label: 'BESS',          icon: Battery, color: '#3f7d3a' },
+  wind:         { label: 'Wind',          icon: Wind,    color: '#0369a1' },
 };
 
 export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = false }) {

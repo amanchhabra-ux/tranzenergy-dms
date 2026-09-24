@@ -16,9 +16,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const DISCIPLINE_COLORS = {
-  'Electrical':          '#ea580c',
+  'Electrical':          '#3f7d3a',
   'Civil':               '#a16207',
-  'Mechanical':          '#15803d',
+  'Mechanical':          '#0f766e',
   'SCADA & Telecom':     '#0369a1',
   'Protection & Control':'#7c3aed',
   'Structural':          '#be185d',
