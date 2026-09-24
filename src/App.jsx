@@ -20,15 +20,15 @@ function AppShell() {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        color: '#fff',
+        background: '#f5f5f4',
+        color: '#18181b',
         fontFamily: 'Outfit, sans-serif'
       }}>
         <div style={{
           width: '50px',
           height: '50px',
-          border: '4px solid rgba(255,255,255,0.1)',
-          borderTopColor: '#6366f1',
+          border: '4px solid #e7e5e4',
+          borderTopColor: '#ea580c',
           borderRadius: '50%',
           animation: 'spin 1s linear infinite',
           marginBottom: '20px'
@@ -39,7 +39,7 @@ function AppShell() {
           }
         `}</style>
         <div style={{ fontSize: '18px', fontWeight: 500, letterSpacing: '0.05em' }}>TRANZENERGY DMS</div>
-        <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '6px' }}>Connecting to cloud database...</div>
+        <div style={{ fontSize: '12px', color: '#71717a', marginTop: '6px' }}>Connecting to cloud database...</div>
       </div>
     );
   }

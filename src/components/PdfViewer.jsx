@@ -84,7 +84,7 @@ function PageCanvas({ page, viewport, pageNum, pins, onCanvasClick, activePinId,
               fontSize: 9, fontWeight: 800, color: '#fff',
               boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
               background: activePinId === pin.id
-                ? '#6366f1'
+                ? '#18181b'
                 : pin.resolved ? 'var(--success)' : 'var(--warning)',
             }}
           >
@@ -192,7 +192,7 @@ export function PdfViewer({ pdfDataUrl, pins = [], onCanvasClick, activePinId, s
         style={{
           flex: 1, overflowY: 'auto', overflowX: 'auto',
           display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '16px', gap: '12px', background: '#111827',
+          padding: '16px', gap: '12px', background: 'var(--pdf-bg)',
         }}
       >
         {loading && (

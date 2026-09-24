@@ -3,7 +3,7 @@ import { AppContext } from '../AppContext';
 import { ExcelViewer } from './ExcelViewer';
 import { PdfViewer } from './PdfViewer';
 import { buildCrsTable, downloadCrs, readCrs, crsFieldUpdates, loadBytes, sniffType } from '../utils/crs';
-import { Download, FileSpreadsheet, ListChecks, FileText, Send, CheckCircle2, Loader2, AlertCircle, MessageSquarePlus } from 'lucide-react';
+import { Download, FileSpreadsheet, ListChecks, FileText, Send, CheckCircle2, Loader2, AlertCircle, MessageSquarePlus, Trash2 } from 'lucide-react';
 
 const STATUS_STYLE = {
   open: { color: 'var(--warning)', background: 'var(--warning-glow)' },
@@ -29,7 +29,7 @@ const now = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
  *  - "CRS PDF": a signed/scanned CRS uploaded as PDF, if any.
  */
 export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, compact = false }) {
-  const { projects, canDo, currentUser, updateDrawing, addComment, updateCrsItems, setPinStatus, retryCrsSync } = useContext(AppContext);
+  const { projects, canDo, currentUser, updateDrawing, addComment, updateCrsItems, setPinStatus, retryCrsSync, canDeleteComment, deletePin, deleteCrsItem } = useContext(AppContext);
   const project = projects.find(p => p.id === drawing.projectId);
   const canEdit = canDo('upload');
   const [mode, setMode] = useState('auto');
@@ -103,6 +103,15 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
     setNewComment('');
   };
 
+  const removeRow = (r) => {
+    const what = r.kind === 'pin'
+      ? `Delete pin ${r.pin} and all its comments?`
+      : r.kind === 'excel' ? 'Delete this comment? It will also be cleared from the CRS Excel.' : 'Delete this comment?';
+    if (!window.confirm(what)) return;
+    if (r.kind === 'pin') { if (activePinId === r.pinId) onSelectPin?.(null); deletePin(drawing.id, r.pinId); }
+    else deleteCrsItem(drawing.id, r.idx);
+  };
+
   // ── UI bits ──────────────────────────────────────────────────────────────
   const tabBtn = (key, label, Icon) => (
     <button className="btn btn-sm" onClick={() => setMode(key)} style={{
@@ -172,7 +181,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
           <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '6px 16px', fontSize: 11, marginBottom: 12, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
             {[
               ['Drawing No.', drawing.code], ['Revision', drawing.currentVersion],
-              ['Title', drawing.title], ['Status', drawing.status],
+              ['Title', drawing.title], ['Category', drawing.discipline],
               ['Client', drawing.clientName || project?.client], ['Contractor', drawing.contractor],
               ['Consultant', drawing.consultant], ['Project', project?.name || drawing.crsMeta?.project],
             ].map(([k, v]) => (
@@ -236,6 +245,15 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
                       <span style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1, minWidth: 0 }} className="truncate">
                         {[r.commentBy, r.date, r.kind === 'excel' ? 'from Excel' : r.kind === 'local' ? 'added in CRS' : ''].filter(Boolean).join(' · ')}
                       </span>
+                      {canDeleteComment(r.commentBy || (r.kind === 'excel' ? '' : currentUser?.name)) && (
+                        <button
+                          className="comment-delete"
+                          title={r.kind === 'pin' ? 'Delete this pin and its comments' : 'Delete this comment'}
+                          onClick={e => { e.stopPropagation(); removeRow(r); }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
                       {canEdit ? (
                         <select
                           value={statusValue}

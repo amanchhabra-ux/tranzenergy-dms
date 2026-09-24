@@ -9,27 +9,19 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-const STATUS_META = {
-  IFR: { label: 'IFR', color: '#818cf8' },
-  IFA: { label: 'IFA', color: '#fbbf24' },
-  AFC: { label: 'AFC', color: '#34d399' },
-  Superseded: { label: 'Sup', color: '#64748b' },
-};
-
 const DISCIPLINE_COLORS = {
-  'Electrical': '#6366f1', 'Civil': '#f59e0b',
-  'Mechanical': '#10b981', 'SCADA & Telecom': '#06b6d4',
-  'Protection & Control': '#8b5cf6', 'Structural': '#ec4899',
+  'Electrical': '#ea580c', 'Civil': '#a16207',
+  'Mechanical': '#15803d', 'SCADA & Telecom': '#0369a1',
+  'Protection & Control': '#7c3aed', 'Structural': '#be185d',
 };
 
 export function MDLView({ projectId }) {
-  const { drawings, projects, DISCIPLINES, STATUSES, updateDrawing, deleteDrawing, uploadRevision, addLog, canDo } = useContext(AppContext);
+  const { drawings, projects, DISCIPLINES, updateDrawing, deleteDrawing, uploadRevision, addLog, canDo } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
 
   const [contextMenu, setContextMenu] = useState(null);
-  const [filterStatus, setFilterStatus] = useState('all');
   const [filterDisc, setFilterDisc] = useState('all');
   const uploadRefs = useRef({});
   const sheetRef = useRef(null);
@@ -42,7 +34,6 @@ export function MDLView({ projectId }) {
   }, []);
 
   const filtered = projectDrawings.filter(d => {
-    if (filterStatus !== 'all' && d.status !== filterStatus) return false;
     if (filterDisc !== 'all' && d.discipline !== filterDisc) return false;
     return true;
   });
@@ -184,7 +175,6 @@ export function MDLView({ projectId }) {
       'Discipline': d.discipline,
       'Sub-type': d.subType || '',
       'Current Revision': d.currentVersion,
-      'Status': d.status,
       'Revisions': d.versions?.length || 1,
       'Last Updated': d.versions?.[0]?.date?.substring(0,10) || '',
       'Last Author': d.versions?.[0]?.author || '',
@@ -208,10 +198,6 @@ export function MDLView({ projectId }) {
   };
 
   // Context menu actions
-  const handleSetStatus = (drawingId, status) => {
-    updateDrawing(drawingId, { status });
-    setContextMenu(null);
-  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -228,10 +214,6 @@ export function MDLView({ projectId }) {
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* Filters */}
-          <select className="form-input" style={{ padding: '5px 8px', fontSize: '12px', width: 'auto' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="all">All Status</option>
-            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
           <select className="form-input" style={{ padding: '5px 8px', fontSize: '12px', width: 'auto' }} value={filterDisc} onChange={e => setFilterDisc(e.target.value)}>
             <option value="all">All Disciplines</option>
             {DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}
@@ -263,7 +245,6 @@ export function MDLView({ projectId }) {
                   <th>Title</th>
                   <th>Discipline</th>
                   <th style={{ textAlign: 'center' }}>Rev</th>
-                  <th style={{ textAlign: 'center' }}>Status</th>
                   <th style={{ textAlign: 'center' }}>Revisions</th>
                   <th>Last Updated</th>
                   <th>Author</th>
@@ -275,8 +256,7 @@ export function MDLView({ projectId }) {
                   const revCount = dwg.versions?.length || 1;
                   const lastUpdate = dwg.versions?.[0]?.date?.substring(0, 10) || '—';
                   const lastAuthor = dwg.versions?.[0]?.author || '—';
-                  const sm = STATUS_META[dwg.status] || STATUS_META.IFR;
-                  const discColor = DISCIPLINE_COLORS[dwg.discipline] || '#6366f1';
+                  const discColor = DISCIPLINE_COLORS[dwg.discipline] || '#a1a1aa';
 
                   return (
                     <tr
@@ -285,7 +265,7 @@ export function MDLView({ projectId }) {
                       onContextMenu={e => {
                         if (!canDo('upload')) return;
                         e.preventDefault();
-                        setContextMenu({ x: e.clientX, y: e.clientY, drawingId: dwg.id, title: dwg.title, status: dwg.status });
+                        setContextMenu({ x: e.clientX, y: e.clientY, drawingId: dwg.id, title: dwg.title });
                       }}
                     >
                       <td style={{ textAlign: 'center' }}>
@@ -309,10 +289,7 @@ export function MDLView({ projectId }) {
                         <span className="rev-badge">{dwg.currentVersion}</span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <span style={{ fontWeight: 700, fontSize: '12px', color: sm.color }}>{sm.label}</span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary-light)', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                        <span style={{ background: 'var(--primary-glow)', color: 'var(--primary-light)', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
                           {revCount}
                         </span>
                       </td>
@@ -364,23 +341,6 @@ export function MDLView({ projectId }) {
           onClick={e => e.stopPropagation()}
         >
           <div className="ctx-label">{contextMenu.title?.slice(0, 30)}</div>
-          <div className="ctx-label" style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 500, textTransform: 'none', paddingTop: 0 }}>
-            Set Status
-          </div>
-          {['IFR', 'IFA', 'AFC', 'Superseded'].map(s => (
-            <div
-              key={s}
-              className="ctx-item"
-              style={{ fontWeight: contextMenu.status === s ? 700 : 400, color: STATUS_META[s].color }}
-              onClick={() => handleSetStatus(contextMenu.drawingId, s)}
-            >
-              {contextMenu.status === s ? '✓ ' : '  '}{s}
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                {s === 'IFR' ? 'For Review' : s === 'IFA' ? 'For Approval' : s === 'AFC' ? 'Approved' : 'Superseded'}
-              </span>
-            </div>
-          ))}
-          <div className="ctx-divider" />
           <div
             className="ctx-item"
             onClick={() => { updateDrawing(contextMenu.drawingId, { isFlagged: true }); setContextMenu(null); }}

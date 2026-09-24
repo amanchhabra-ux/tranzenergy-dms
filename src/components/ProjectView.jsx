@@ -3,6 +3,7 @@ import { AppContext } from '../AppContext';
 import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
 import { BulkUploadModal } from './BulkUploadModal';
+import { ResizeHandle } from './ResizeHandle';
 import { classifyDrawing } from '../utils/drawingClassifier';
 import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -16,24 +17,17 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const DISCIPLINE_COLORS = {
-  'Electrical':          '#6366f1',
-  'Civil':               '#f59e0b',
-  'Mechanical':          '#10b981',
-  'SCADA & Telecom':     '#06b6d4',
-  'Protection & Control':'#8b5cf6',
-  'Structural':          '#ec4899',
-  'Other':               '#94a3b8',
-};
-
-const STATUS_COLORS = {
-  IFR: 'var(--primary-light)',
-  IFA: 'var(--warning)',
-  AFC: 'var(--success)',
-  Superseded: 'var(--text-muted)',
+  'Electrical':          '#ea580c',
+  'Civil':               '#a16207',
+  'Mechanical':          '#15803d',
+  'SCADA & Telecom':     '#0369a1',
+  'Protection & Control':'#7c3aed',
+  'Structural':          '#be185d',
+  'Other':               '#a1a1aa',
 };
 
 export function ProjectView({ projectId, onBack }) {
-  const { projects, drawings, DISCIPLINES, STATUSES, createDrawing, uploadCRS, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
+  const { projects, drawings, DISCIPLINES, createDrawing, uploadCRS, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -44,6 +38,8 @@ export function ProjectView({ projectId, onBack }) {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [listWidth, setListWidth] = useState(() => { try { return parseInt(localStorage.getItem('dms_list_width'), 10) || 280; } catch { return 280; } });
+  const listDragStart = useRef(0);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [movingDrawingId, setMovingDrawingId] = useState(null);
@@ -87,7 +83,7 @@ export function ProjectView({ projectId, onBack }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="theme-light" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Project header */}
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -131,7 +127,7 @@ export function ProjectView({ projectId, onBack }) {
               <span>{tab.label}</span>
               {count !== null && count > 0 && (
                 <span style={{
-                  background: activeTab === tab.key ? 'var(--primary-glow)' : 'rgba(255,255,255,0.06)',
+                  background: activeTab === tab.key ? 'var(--primary-glow)' : 'var(--bg-hover)',
                   color: activeTab === tab.key ? 'var(--primary-light)' : 'var(--text-muted)',
                   fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '999px',
                 }}>
@@ -160,7 +156,7 @@ export function ProjectView({ projectId, onBack }) {
         <div className="workspace">
           {/* Drawing list sidebar */}
           {showSidebar && (
-          <div className="drawing-list-panel">
+          <div className="drawing-list-panel" style={{ width: listWidth, borderRight: 'none' }}>
             <div className="drawing-list-header">
               <div className="search-box">
                 <Search size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
@@ -202,16 +198,13 @@ export function ProjectView({ projectId, onBack }) {
                             {dwg.discipline}
                           </span>
                         )}
-                        <span style={{ fontSize: '10px', fontWeight: 700, color: STATUS_COLORS[dwg.status] || 'var(--text-muted)' }}>
-                          {dwg.status}
-                        </span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                       <div
                         style={{
                           width: 3, height: 36, borderRadius: 2,
-                          background: DISCIPLINE_COLORS[dwg.discipline] || '#6366f1',
+                          background: DISCIPLINE_COLORS[dwg.discipline] || '#a1a1aa',
                           opacity: 0.7
                         }}
                       />
@@ -232,7 +225,7 @@ export function ProjectView({ projectId, onBack }) {
                         style={{
                           position: 'absolute', right: 0, top: '100%', zIndex: 50,
                           background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                          borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                          borderRadius: '8px', boxShadow: 'var(--shadow-lg)',
                           minWidth: '180px', overflow: 'hidden',
                         }}
                         onClick={e => e.stopPropagation()}
@@ -255,7 +248,7 @@ export function ProjectView({ projectId, onBack }) {
                               setMovingDrawingId(null);
                             }}
                           >
-                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#6366f1', marginRight: 8 }} />
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#a1a1aa', marginRight: 8 }} />
                             {d}
                           </button>
                         ))}
@@ -266,6 +259,19 @@ export function ProjectView({ projectId, onBack }) {
               )}
             </div>
           </div>
+          )}
+          {showSidebar && (
+            <ResizeHandle
+              onDragStart={() => { listDragStart.current = listWidth; }}
+              onDrag={dx => setListWidth(Math.max(120, Math.min(560, listDragStart.current + dx)))}
+              onDragEnd={() => setListWidth(w => {
+                if (w < 180) { setShowSidebar(false); return 280; } // dragged closed
+                try { localStorage.setItem('dms_list_width', String(w)); } catch { /* ignore */ }
+                return w;
+              })}
+              onReset={() => { setListWidth(280); try { localStorage.removeItem('dms_list_width'); } catch { /* ignore */ } }}
+              title="Drag to resize the drawings list · drag left to hide · double-click to reset"
+            />
           )}
 
           {/* Drawing detail */}
@@ -282,7 +288,6 @@ export function ProjectView({ projectId, onBack }) {
         <RegisterDrawingModal
           project={project}
           DISCIPLINES={DISCIPLINES}
-          STATUSES={STATUSES}
           onClose={() => setShowRegisterModal(false)}
           onCreated={(id) => { setActiveDrawingId(id); setActiveTab('all'); setShowRegisterModal(false); }}
           createDrawing={createDrawing}
@@ -330,7 +335,7 @@ export function ProjectView({ projectId, onBack }) {
 }
 
 // ─── Register Drawing Modal ──────────────────────────────────────────────────
-function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreated, createDrawing, uploadCRS }) {
+function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, createDrawing, uploadCRS }) {
   const [crsFile, setCrsFile] = useState(null);
   const [crsParsed, setCrsParsed] = useState(null);
   const [crsMsg, setCrsMsg] = useState('');
@@ -358,7 +363,6 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
   const [desc, setDesc] = useState('');
   const [discipline, setDiscipline] = useState('Electrical');
   const [subType, setSubType] = useState('');
-  const [status, setStatus] = useState('IFA');
   const [clientName, setClientName] = useState('');
   const [consultant, setConsultant] = useState('');
   const [contractor, setContractor] = useState('');
@@ -600,7 +604,6 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
       discipline,
       subType,
       projectId: project.id,
-      status,
       pdfData: uploadedUrl || pdfDataUrl,
       clientName,
       consultant,
@@ -659,7 +662,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={handleAutoPopulate}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', justifyContent: 'center', background: 'rgba(99,102,241,0.1)', color: 'var(--primary-light)', border: '1px solid rgba(99,102,241,0.3)', padding: '8px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', justifyContent: 'center', background: 'var(--primary-glow)', color: 'var(--primary-dark)', border: '1px solid #fed7aa', padding: '8px' }}
                 >
                   🔍 Auto-Populate Details from PDF
                 </button>
@@ -690,18 +693,10 @@ function RegisterDrawingModal({ project, DISCIPLINES, STATUSES, onClose, onCreat
               <input className="form-input" placeholder="Descriptive title of the drawing" value={title} onChange={e => setTitle(e.target.value)} required />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Sub-type</label>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Sub-type</label>
                 <input className="form-input" placeholder="SLD, Layout, Foundation…" value={subType} onChange={e => setSubType(e.target.value)} />
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Initial Status</label>
-                <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>
-                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginTop: '12px' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>

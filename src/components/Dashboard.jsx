@@ -3,17 +3,10 @@ import { AppContext } from '../AppContext';
 import { Zap, Sun, Battery, Wind, FileText, CheckCircle, Clock, AlertCircle, Plus, ArrowRight } from 'lucide-react';
 
 const TYPE_META = {
-  transmission: { label: 'Transmission Line', color: '#6366f1', icon: Zap,     cls: 'type-transmission' },
-  solar:        { label: 'Solar Plant',        color: '#f59e0b', icon: Sun,     cls: 'type-solar' },
-  bess:         { label: 'BESS Plant',         color: '#06b6d4', icon: Battery, cls: 'type-bess' },
-  wind:         { label: 'Wind Farm',          color: '#10b981', icon: Wind,    cls: 'type-wind' },
-};
-
-const STATUS_META = {
-  IFR:        { label: 'IFR', color: '#6366f1', desc: 'Issued for Review' },
-  IFA:        { label: 'IFA', color: '#f59e0b', desc: 'Issued for Approval' },
-  AFC:        { label: 'AFC', color: '#10b981', desc: 'Approved for Construction' },
-  Superseded: { label: 'Sup', color: '#475569', desc: 'Superseded' },
+  transmission: { label: 'Transmission Line', color: '#27272a', icon: Zap,     cls: 'type-transmission' },
+  solar:        { label: 'Solar Plant',        color: '#d97706', icon: Sun,     cls: 'type-solar' },
+  bess:         { label: 'BESS Plant',         color: '#ea580c', icon: Battery, cls: 'type-bess' },
+  wind:         { label: 'Wind Farm',          color: '#15803d', icon: Wind,    cls: 'type-wind' },
 };
 
 export function Dashboard({ onOpenProject }) {
@@ -25,23 +18,16 @@ export function Dashboard({ onOpenProject }) {
   const filteredDrawings = drawings.filter(d => filteredProjects.some(p => p.id === d.projectId));
 
   const totalDrawings = filteredDrawings.length;
-  const ifaCount  = filteredDrawings.filter(d => d.status === 'IFA').length;
-  const afcCount  = filteredDrawings.filter(d => d.status === 'AFC').length;
+  const crsCount  = filteredDrawings.filter(d => d.crsData).length;
+  const revCount  = filteredDrawings.reduce((n, d) => n + (d.versions?.length || 1), 0);
   const openPins  = filteredDrawings.reduce((n, d) => n + (d.pins?.filter(p => !p.resolved).length || 0), 0);
 
   const stats = [
-    { label: 'Total Drawings',     value: totalDrawings, icon: FileText,    color: '#6366f1' },
-    { label: 'Issued for Approval',value: ifaCount,      icon: Clock,       color: '#f59e0b' },
-    { label: 'Approved (AFC)',      value: afcCount,      icon: CheckCircle, color: '#10b981' },
-    { label: 'Open Comments',       value: openPins,      icon: AlertCircle, color: '#ef4444' },
+    { label: 'Total Drawings',     value: totalDrawings, icon: FileText,    color: '#27272a' },
+    { label: 'Revisions',          value: revCount,      icon: Clock,       color: '#d97706' },
+    { label: 'CRS Attached',        value: crsCount,      icon: CheckCircle, color: '#15803d' },
+    { label: 'Open Comments',       value: openPins,      icon: AlertCircle, color: '#dc2626' },
   ];
-
-  const projectProgress = (pid) => {
-    const dws = drawings.filter(d => d.projectId === pid);
-    if (!dws.length) return 0;
-    const afc = dws.filter(d => d.status === 'AFC').length;
-    return Math.round((afc / dws.length) * 100);
-  };
 
   const handleCreate = (e) => {
     e.preventDefault();
@@ -97,8 +83,9 @@ export function Dashboard({ onOpenProject }) {
               {filteredProjects.map(p => {
                 const meta = TYPE_META[p.type] || TYPE_META.transmission;
                 const Icon = meta.icon;
-                const prog = projectProgress(p.id);
-                const dwgCount = drawings.filter(d => d.projectId === p.id).length;
+                const pDwgs = drawings.filter(d => d.projectId === p.id);
+                const dwgCount = pDwgs.length;
+                const pOpen = pDwgs.reduce((n, d) => n + (d.pins?.filter(x => !x.resolved).length || 0), 0);
 
                 return (
                   <div
@@ -113,18 +100,9 @@ export function Dashboard({ onOpenProject }) {
                     <div className="project-card-name">{p.name}</div>
                     <div className="project-card-client">{p.client}</div>
 
-                    <div className="project-card-progress">
-                      <div className="progress-bar-track">
-                        <div
-                          className="progress-bar-fill"
-                          style={{ width: `${prog}%`, background: meta.color }}
-                        />
-                      </div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: meta.color }}>{prog}% AFC</span>
-                    </div>
-
                     <div className="project-card-meta">
                       <span>{dwgCount} drawings</span>
+                      {pOpen > 0 && <><span>·</span><span style={{ color: 'var(--warning)' }}>{pOpen} open comments</span></>}
                       <span>·</span>
                       <span>{p.location}</span>
                       <ArrowRight size={12} style={{ marginLeft: 'auto', color: 'var(--text-muted)' }} />

@@ -32,7 +32,7 @@ async function readFirstPageText(file) {
 
 export function BulkUploadModal({ project, onClose, onDone }) {
   const {
-    DISCIPLINES, STATUSES, drawings, createDrawing, uploadRevision, uploadCRS, addDiscipline, addLog,
+    DISCIPLINES, drawings, createDrawing, uploadRevision, uploadCRS, addDiscipline, addLog,
   } = useContext(AppContext);
 
   const [rows, setRows] = useState([]);           // one row per PDF
@@ -43,7 +43,6 @@ export function BulkUploadModal({ project, onClose, onDone }) {
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [defaultStatus, setDefaultStatus] = useState('IFA');
   const [filterCat, setFilterCat] = useState('all');
   const fileRef = useRef(null);
   const folderRef = useRef(null);
@@ -162,13 +161,13 @@ export function BulkUploadModal({ project, onClose, onDone }) {
           );
           const existing = existingByCode.get(code) || createdByCode.get(code);
           if (existing) {
-            uploadRevision(existing.id, `Bulk upload: ${row.file.name}`, blob.url, defaultStatus);
+            uploadRevision(existing.id, `Bulk upload: ${row.file.name}`, blob.url);
             rowToDwgId.set(row.id, existing.id);
             updateRow(row.id, { status: 'done', message: 'Added as new revision' });
           } else {
             const dwg = createDrawing({
               code, title: row.title.trim() || code, discipline: row.category,
-              projectId: project.id, status: defaultStatus, pdfData: blob.url,
+              projectId: project.id, pdfData: blob.url,
               initialVersion: row.rev || 'R0', changeSummary: `Initial issue (bulk upload: ${row.file.name}).`,
             });
             if (dwg) { createdByCode.set(code, dwg); rowToDwgId.set(row.id, dwg.id); }
@@ -286,10 +285,6 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                     <select className="form-input" style={{ width: 'auto', padding: '4px 8px', fontSize: '12px' }} value="" onChange={e => e.target.value && setAllCategory(e.target.value)}>
                       <option value="">— category —</option>
                       {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>Status</label>
-                    <select className="form-input" style={{ width: 'auto', padding: '4px 8px', fontSize: '12px' }} value={defaultStatus} onChange={e => setDefaultStatus(e.target.value)}>
-                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </>
                 )}

@@ -7,11 +7,11 @@ export const AppContext = createContext(null);
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
-  { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#6366f1' },
-  { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#06b6d4' },
-  { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#10b981' },
-  { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#f59e0b' },
-  { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#94a3b8' },
+  { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#ea580c' },
+  { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#27272a' },
+  { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#15803d' },
+  { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#d97706' },
+  { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#a1a1aa' },
 ];
 
 const SEED_PROJECTS = [];
@@ -24,6 +24,10 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 // `force` also creates an Excel when the drawing has none yet (changes made in the CRS panel).
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
+
+// Avatar colours from the old indigo/cyan palette → charcoal + orange palette
+const OLD_AVATAR = { '#6366f1': '#ea580c', '#06b6d4': '#27272a', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#f97316': '#c2410c', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b' };
+const recolorUsers = (list) => (list || []).map(u => (OLD_AVATAR[u.color] ? { ...u, color: OLD_AVATAR[u.color] } : u));
 
 // Unique ids — Date.now() alone collides when many items are created at once (bulk upload)
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -110,7 +114,7 @@ export function AppProvider({ children }) {
 
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(saved?.currentUser || null);
-  const [users,       setUsers]       = useState(saved?.users       || SEED_USERS);
+  const [users,       setUsers]       = useState(saved?.users ? recolorUsers(saved.users) : SEED_USERS);
   const [projects,    setProjects]    = useState(saved?.projects    || SEED_PROJECTS);
   const [drawings,    setDrawings]    = useState(saved?.drawings    || SEED_DRAWINGS);
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
@@ -133,7 +137,7 @@ export function AppProvider({ children }) {
   const pushAgain = useRef(false);
 
   const applyState = useCallback((s) => {
-    setUsers(s.users?.length ? s.users : SEED_USERS);
+    setUsers(s.users?.length ? recolorUsers(s.users) : SEED_USERS);
     setProjects(s.projects || []);
     setDrawings(s.drawings || []);
     setProposals(s.proposals || []);
@@ -339,7 +343,6 @@ export function AppProvider({ children }) {
       discipline: data.discipline || 'Electrical',
       subType: data.subType || '',
       projectId: data.projectId,
-      status: data.status || 'IFA',
       currentVersion: startVer,
       pdfData: data.pdfData || null,
       crsData: null,
@@ -443,8 +446,58 @@ export function AppProvider({ children }) {
     }, true)));
   };
 
+  // ─── Deleting comments ────────────────────────────────────────────────────
+  // Who may delete: the comment's author, or a Project Manager / Admin.
+  const canDeleteComment = useCallback((author) => {
+    if (!currentUser) return false;
+    if (canDo('manage_projects')) return true;
+    return canDo('upload') && !!author && author.replace(/ \(Client\)$/, '') === currentUser.name;
+  }, [currentUser, canDo]);
+
+  // Rows in the CRS Excel that held a deleted comment get blanked on the next sync
+  const withClearedRow = (d, row) => (row === undefined || row === null ? d : { ...d, crsClearRows: [...new Set([...(d.crsClearRows || []), row])] });
+
+  // One reply/comment inside a pin's thread
+  const deletePinComment = (drawingId, pinId, commentId) => {
+    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs({
+      ...d,
+      pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, comments: (p.comments || []).filter(c => c.id !== commentId) }),
+    })));
+    addLog('Comment deleted.');
+  };
+
+  // A whole pin and all its comments
+  const deletePin = (drawingId, pinId) => {
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const key = `pin:${pinId}`;
+      const { [key]: row, ...restMap } = d.crsRowMap || {};
+      return bumpCrs(withClearedRow({ ...d, pins: (d.pins || []).filter(p => p.id !== pinId), crsRowMap: restMap }, row));
+    }));
+    addLog('Comment pin deleted.');
+  };
+
+  // A CRS item that isn't a pin (from the uploaded Excel, or added in the CRS panel)
+  const deleteCrsItem = (drawingId, idx) => {
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const item = (d.crsImported || [])[idx];
+      if (!item) return d;
+      let next = { ...d, crsImported: d.crsImported.filter((_, i) => i !== idx) };
+      if (item.local) {
+        const key = `loc:${item.id}`;
+        const { [key]: row, ...restMap } = d.crsRowMap || {};
+        next = withClearedRow({ ...next, crsRowMap: restMap }, row);
+      } else {
+        next = withClearedRow(next, item.row);
+      }
+      return bumpCrs(next, true);
+    }));
+    addLog('CRS comment deleted.');
+  };
+
   // The CRS Excel was rewritten with the latest comments: swap in the new file quietly
-  const saveCrsSync = (drawingId, { crsData, crsRowMap, crsLayout, rev, created, fileName }) => {
+  const saveCrsSync = (drawingId, { crsData, crsRowMap, crsLayout, rev, created, fileName, clearedRows = [] }) => {
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
       if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData);
@@ -454,6 +507,7 @@ export function AppProvider({ children }) {
         crsFileType: created ? 'excel' : d.crsFileType,
         crsSyncedRev: Math.max(d.crsSyncedRev || 0, rev),
         crsSyncError: null,
+        crsClearRows: (d.crsClearRows || []).filter(r => !clearedRows.includes(r)),
         crsSyncedAt: new Date().toISOString(),
       };
     }));
@@ -480,7 +534,7 @@ export function AppProvider({ children }) {
         const fileName = d.crsFileName || `${d.code}_CRS.xlsx`;
         const file = new File([res.bytes], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = await uploadCrsFile(d.code, file);
-        saveCrsSync(d.id, { crsData: url, crsRowMap: res.rowMap, crsLayout: res.layout, rev, created: res.created, fileName });
+        saveCrsSync(d.id, { crsData: url, crsRowMap: res.rowMap, crsLayout: res.layout, rev, created: res.created, fileName, clearedRows: res.clearedRows });
       } catch (err) {
         console.error('CRS Excel update failed', err);
         // stop retrying this revision; the next change (or Retry) tries again
@@ -524,7 +578,6 @@ export function AppProvider({ children }) {
       return {
         ...dwg,
         currentVersion: nextVer,
-        status: newStatus || dwg.status,
         pdfData: pdfDataUrl || dwg.pdfData,
         versions: [rev, ...(dwg.versions || [])]
       };
@@ -596,7 +649,7 @@ export function AppProvider({ children }) {
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
     if (!canDo('admin')) return null;
-    const u = { id: `u-${Date.now()}`, avatar: data.name.slice(0,2).toUpperCase(), color: '#6366f1', ...data };
+    const u = { id: `u-${Date.now()}`, avatar: data.name.slice(0,2).toUpperCase(), color: '#ea580c', ...data };
     setUsers(prev => [...prev, u]);
     addLog(`User <strong>${u.name}</strong> added.`);
     return u;
@@ -666,6 +719,7 @@ export function AppProvider({ children }) {
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
       moveDrawingToDiscipline,
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
+      canDeleteComment, deletePinComment, deletePin, deleteCrsItem,
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Users

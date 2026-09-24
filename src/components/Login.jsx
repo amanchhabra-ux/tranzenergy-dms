@@ -62,10 +62,10 @@ export function Login() {
   };
 
   const projectTypes = [
-    { type: 'Transmission Lines', color: '#6366f1', icon: '🗼' },
-    { type: 'Solar Plants', color: '#f59e0b', icon: '☀️' },
-    { type: 'BESS Plants', color: '#06b6d4', icon: '🔋' },
-    { type: 'Wind Plants', color: '#10b981', icon: '💨' },
+    { type: 'Transmission Lines', color: '#27272a', icon: '🗼' },
+    { type: 'Solar Plants', color: '#d97706', icon: '☀️' },
+    { type: 'BESS Plants', color: '#ea580c', icon: '🔋' },
+    { type: 'Wind Plants', color: '#15803d', icon: '💨' },
   ];
 
   return (
@@ -112,7 +112,7 @@ export function Login() {
 
         {/* Sectors Supported */}
         <div style={{ marginTop: '36px', textAlign: 'center' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', marginBottom: '12px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '12px' }}>
             Sectors Supported
           </div>
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -124,7 +124,7 @@ export function Login() {
                   padding: '6px 14px', borderRadius: '9999px',
                   background: `${pt.color}15`, border: `1px solid ${pt.color}40`,
                   color: pt.color, fontSize: '11px', fontWeight: 600,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                  boxShadow: 'none'
                 }}
               >
                 {pt.icon} {pt.type}
@@ -134,14 +134,14 @@ export function Login() {
         </div>
 
         {/* Restore Workspace from Backup */}
-        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
+        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--primary-light)', fontWeight: 500 }}>
             <Upload size={14} />
             <span>Restore Workspace from Backup (.json)</span>
             <input type="file" accept=".json" onChange={handleImportData} style={{ display: 'none' }} />
           </label>
           {importStatus && (
-            <div style={{ marginTop: '8px', fontSize: '11px', color: importStatus.includes('successfully') ? '#10b981' : '#ef4444', fontWeight: 500 }}>
+            <div style={{ marginTop: '8px', fontSize: '11px', color: importStatus.includes('successfully') ? '#15803d' : '#dc2626', fontWeight: 500 }}>
               {importStatus}
             </div>
           )}

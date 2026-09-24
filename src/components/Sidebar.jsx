@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 
 const TYPE_META = {
-  transmission: { label: 'Transmission', icon: Zap,     color: '#6366f1' },
-  solar:        { label: 'Solar',         icon: Sun,     color: '#f59e0b' },
-  bess:         { label: 'BESS',          icon: Battery, color: '#06b6d4' },
-  wind:         { label: 'Wind',          icon: Wind,    color: '#10b981' },
+  transmission: { label: 'Transmission', icon: Zap,     color: '#27272a' },
+  solar:        { label: 'Solar',         icon: Sun,     color: '#d97706' },
+  bess:         { label: 'BESS',          icon: Battery, color: '#ea580c' },
+  wind:         { label: 'Wind',          icon: Wind,    color: '#15803d' },
 };
 
 export function Sidebar({ activeView, activeProjectId, onNavigate }) {

@@ -3,11 +3,11 @@ import { AppContext } from '../AppContext';
 import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload } from 'lucide-react';
 
 const ROLE_COLORS = {
-  'Admin': '#6366f1', 'Project Manager': '#06b6d4',
-  'Senior Engineer': '#10b981', 'Engineer': '#f59e0b', 'Viewer': '#94a3b8',
+  'Admin': '#ea580c', 'Project Manager': '#27272a',
+  'Senior Engineer': '#15803d', 'Engineer': '#d97706', 'Viewer': '#a1a1aa',
 };
 
-const AVATAR_COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#0ea5e9','#a78bfa'];
+const AVATAR_COLORS = ['#ea580c','#27272a','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#c2410c','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
   const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES } = useContext(AppContext);
@@ -81,11 +81,11 @@ export function AdminPanel({ initialTab = 'users' }) {
     try {
       const cleanData = {
         users: [
-          { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#6366f1' },
-          { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#06b6d4' },
-          { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#10b981' },
-          { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#f59e0b' },
-          { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#94a3b8' },
+          { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#ea580c' },
+          { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#27272a' },
+          { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#15803d' },
+          { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#d97706' },
+          { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#a1a1aa' },
         ],
         projects: [],
         drawings: [],
@@ -225,15 +225,13 @@ export function AdminPanel({ initialTab = 'users' }) {
                     <th>Client</th>
                     <th>Type</th>
                     <th style={{ textAlign: 'center' }}>Drawings</th>
-                    <th style={{ textAlign: 'center' }}>AFC %</th>
+                    <th style={{ textAlign: 'center' }}>Users</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {projects.map(p => {
                     const dwgs = drawings.filter(d => d.projectId === p.id);
-                    const afc = dwgs.filter(d => d.status === 'AFC').length;
-                    const pct = dwgs.length ? Math.round((afc / dwgs.length) * 100) : 0;
                     return (
                       <tr key={p.id}>
                         <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--accent)' }}>{p.code}</span></td>
@@ -243,11 +241,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                           <span className="badge badge-muted" style={{ textTransform: 'capitalize' }}>{p.type}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>{dwgs.length}</td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: pct === 100 ? 'var(--success)' : pct > 50 ? 'var(--warning)' : 'var(--text-muted)' }}>
-                            {pct}%
-                          </span>
-                        </td>
+                        <td style={{ textAlign: 'center' }}>{(p.assignedUsers || []).length}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="btn btn-ghost btn-sm btn-icon"
@@ -330,7 +324,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                   <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0' }}>2. Import Data</h4>
                   <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
                     Upload a backup file to restore your workspace.
-                    <span style={{ color: '#ef4444', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: This overwrites local data!</span>
+                    <span style={{ color: '#dc2626', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: This overwrites local data!</span>
                   </p>
                 </div>
                 <label className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '100%', margin: 0 }}>
@@ -343,13 +337,13 @@ export function AdminPanel({ initialTab = 'users' }) {
               {currentUser?.role === 'Admin' && (
                 <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px', border: '1px solid rgba(239, 68, 68, 0.15)' }}>
                   <div>
-                    <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0', color: '#ef4444' }}>3. Reset Instance</h4>
+                    <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0', color: '#dc2626' }}>3. Reset Instance</h4>
                     <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
                       Delete all projects, drawings, and comments globally.
-                      <span style={{ color: '#ef4444', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: Clears data for all users!</span>
+                      <span style={{ color: '#dc2626', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: Clears data for all users!</span>
                     </p>
                   </div>
-                  <button className="btn" onClick={handleResetInstance} style={{ width: '100%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 16px', borderRadius: '6px', fontWeight: 500, fontSize: '13px' }}>
+                  <button className="btn" onClick={handleResetInstance} style={{ width: '100%', background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 16px', borderRadius: '6px', fontWeight: 500, fontSize: '13px' }}>
                     <Trash2 size={14} /> Reset Workspace
                   </button>
                 </div>
@@ -357,7 +351,7 @@ export function AdminPanel({ initialTab = 'users' }) {
             </div>
 
             {importStatus && (
-              <div className="card" style={{ padding: '12px 16px', fontSize: '13px', background: importStatus.includes('successfully') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', border: importStatus.includes('successfully') ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)', color: importStatus.includes('successfully') ? '#10b981' : '#ef4444', borderRadius: '6px', textAlign: 'center', fontWeight: 500 }}>
+              <div className="card" style={{ padding: '12px 16px', fontSize: '13px', background: importStatus.includes('successfully') ? 'var(--success-glow)' : 'rgba(239,68,68,0.1)', border: importStatus.includes('successfully') ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)', color: importStatus.includes('successfully') ? '#10b981' : '#dc2626', borderRadius: '6px', textAlign: 'center', fontWeight: 500 }}>
                 {importStatus}
               </div>
             )}
@@ -438,7 +432,7 @@ function ManageProjectUsersModal({ project, users, onClose, onSave }) {
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {users.map(u => (
-              <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer', background: selectedUsers.has(u.id) ? 'rgba(99,102,241,0.05)' : 'transparent' }}>
+              <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer', background: selectedUsers.has(u.id) ? 'var(--primary-glow)' : 'transparent' }}>
                 <input
                   type="checkbox"
                   checked={selectedUsers.has(u.id)}

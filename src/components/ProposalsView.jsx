@@ -136,7 +136,7 @@ export function ProposalsView() {
             
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
               {/* PDF Viewer */}
-              <div style={{ flex: 2, borderRight: '1px solid var(--border)', background: '#111827', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 2, borderRight: '1px solid var(--border)', background: 'var(--pdf-bg)', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {activeProposal.fileData ? (
                   activeProposal.fileData.startsWith('http') || activeProposal.fileData.startsWith('data:application/pdf') ? (
                     <PdfViewer pdfDataUrl={activeProposal.fileData} />

@@ -1,7 +1,7 @@
-import React, { useContext, useState, useRef } from 'react';
+import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
-import { Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelRight, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
+import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
@@ -14,30 +14,32 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-const STATUS_MAP = {
-  IFR: { label: 'Issued for Review',     cls: 'badge-ifr',  icon: AlertCircle },
-  IFA: { label: 'Issued for Approval',   cls: 'badge-ifa',  icon: Clock },
-  AFC: { label: 'Approved for Const.',   cls: 'badge-afc',  icon: CheckCircle },
-  Superseded: { label: 'Superseded',     cls: 'badge-superseded', icon: X },
-};
-
 const DISCIPLINE_COLORS = {
-  'Electrical':          '#6366f1',
-  'Civil':               '#f59e0b',
-  'Mechanical':          '#10b981',
-  'SCADA & Telecom':     '#06b6d4',
-  'Protection & Control':'#8b5cf6',
-  'Structural':          '#ec4899',
+  'Electrical':          '#ea580c',
+  'Civil':               '#a16207',
+  'Mechanical':          '#15803d',
+  'SCADA & Telecom':     '#0369a1',
+  'Protection & Control':'#7c3aed',
+  'Structural':          '#be185d',
 };
 
 export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
-  const { drawings, projects, currentUser, canDo, uploadRevision, setDrawingStatus, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, STATUSES, DISCIPLINES, moveDrawingToDiscipline } = useContext(AppContext);
+  const { drawings, projects, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin } = useContext(AppContext);
 
   const drawing = drawings.find(d => d.id === drawingId);
 
   const [activeVersion, setActiveVersion] = useState(null); // null = latest
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showComments, setShowComments] = useState(true);
+  const [showComments, setShowComments] = useState(false); // opens with the Comments button
+  // Focus mode: hide the menu, project header, tabs, drawings list and revisions — just the PDF + CRS
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    document.body.classList.toggle('dms-focus', focus);
+    const onKey = (e) => { if (e.key === 'Escape' && focus && !document.querySelector('.modal-overlay')) setFocus(false); };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); };
+  }, [focus]);
+  useEffect(() => () => document.body.classList.remove('dms-focus'), []);
   // Panel sizes (px), remembered per browser
   const readSize = (k, d) => { try { const v = parseInt(localStorage.getItem(k), 10); return Number.isFinite(v) ? v : d; } catch { return d; } };
   const saveSize = (k, v) => { try { localStorage.setItem(k, String(Math.round(v))); } catch { /* storage unavailable */ } };
@@ -103,8 +105,6 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
 
   const pdfSrc = displayVersion?.pdfData || null;
 
-  const statusMeta = STATUS_MAP[drawing.status] || STATUS_MAP.IFR;
-  const StatusIcon = statusMeta.icon;
 
   const openPins = drawing.pins?.filter(p => !p.resolved).length || 0;
   const activePin = drawing.pins?.find(p => p.id === (newPinId || activePinId));
@@ -116,6 +116,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
     setNewPinId(pinId);
     setActivePinId(pinId);
     setPinMode(false);
+    setShowComments(true);
   };
 
   // ── Send comment ─────────────────────────────────────────────────────────
@@ -150,183 +151,145 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
     <div className="drawing-detail">
       {/* Drawing header */}
       <div className="drawing-detail-header">
-        <div style={{ display: 'flex', align: 'center', gap: '12px', flex: 1, minWidth: 0, alignItems: 'center' }}>
-          {onToggleSidebar && (
-            <button className="btn btn-ghost btn-sm btn-icon" onClick={onToggleSidebar} style={{ color: showSidebar ? 'var(--primary-light)' : undefined, flexShrink: 0 }} title={showSidebar ? 'Hide drawings list' : 'Show drawings list'}>
-              <PanelLeft size={16} />
+        <div style={{ display: 'flex', gap: 10, flex: '1 1 340px', minWidth: 0, alignItems: 'center' }}>
+          <div className="toolgroup" style={{ flexShrink: 0 }}>
+            <button className={`btn btn-ghost btn-icon ${focus ? 'on' : ''}`} onClick={() => setFocus(f => !f)} title={focus ? 'Exit focus mode (Esc)' : 'Focus mode: hide menus and lists'}>
+              {focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
-          )}
-          <span className="drawing-code-badge">{drawing.code}</span>
+            {onToggleSidebar && !focus && (
+              <button className={`btn btn-ghost btn-icon ${showSidebar ? 'on' : ''}`} onClick={onToggleSidebar} title={showSidebar ? 'Hide drawings list' : 'Show drawings list'}>
+                <PanelLeft size={15} />
+              </button>
+            )}
+          </div>
           <div style={{ minWidth: 0 }}>
-            <div className="drawing-title-text truncate">{drawing.title}</div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span className="badge badge-muted">{drawing.discipline}</span>
-              <span className={`badge ${statusMeta.cls}`}>
-                <StatusIcon size={10} />
-                {drawing.status}
+            <span className="drawing-code-badge">{drawing.code}</span>
+            <div className="drawing-title-text truncate" style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }} title={drawing.title}>{drawing.title}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: DISCIPLINE_COLORS[drawing.discipline] || '#94a3b8' }} />
+                {drawing.discipline}
               </span>
-              {drawing.clientName && (
-                <span className="badge" style={{ background: 'rgba(99,102,241,0.08)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', fontSize: '10px' }}>
-                  Client: {drawing.clientName}
-                </span>
-              )}
-              {drawing.consultant && (
-                <span className="badge" style={{ background: 'rgba(6,182,212,0.08)', color: '#22d3ee', border: '1px solid rgba(6,182,212,0.2)', fontSize: '10px' }}>
-                  Consultant: {drawing.consultant}
-                </span>
-              )}
-              {drawing.contractor && (
-                <span className="badge" style={{ background: 'rgba(16,185,129,0.08)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)', fontSize: '10px' }}>
-                  Contractor: {drawing.contractor}
-                </span>
-              )}
-              {openPins > 0 && (
-                <span className="badge badge-warning">{openPins} open comment{openPins !== 1 ? 's' : ''}</span>
-              )}
+              {[['Client', drawing.clientName], ['Contractor', drawing.contractor], ['Consultant', drawing.consultant]]
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <span key={k} className="truncate" style={{ maxWidth: 220 }} title={`${k}: ${v}`}>
+                    <span style={{ color: 'var(--text-muted)' }}>{k}</span> {v}
+                  </span>
+                ))}
+              {openPins > 0 && <span className="badge badge-warning">{openPins} open pin{openPins !== 1 ? 's' : ''}</span>}
             </div>
           </div>
         </div>
 
-        <div className="drawing-header-meta" style={{ position: 'relative' }}>
-          {/* View-only controls available to all users who can view */}
-          <button className="btn btn-ghost btn-sm btn-icon" title={showComments ? 'Hide comments' : 'Show comments'} onClick={() => setShowComments(s => !s)} style={{ color: showComments ? 'var(--primary-light)' : undefined }}>
-            <PanelRight size={16} />
-          </button>
-          <button className="btn btn-ghost btn-sm btn-icon" title="Download" onClick={handleDownload}>
-            <Download size={16} />
-          </button>
-
-          {/* Edit/Change controls restricted to users who can modify/upload */}
-          {canDo('upload') && (
-            <>
-              <button className="btn btn-ghost btn-sm btn-icon" title={pinMode ? 'Cancel pin' : 'Add comment pin'} onClick={() => setPinMode(m => !m)} style={{ color: pinMode ? 'var(--warning)' : undefined }}>
-                <MessageSquare size={16} />
+        <div className="drawing-header-meta" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
+          <div className="toolgroup">
+            {canDo('upload') && (
+              <button className={`btn btn-ghost btn-icon ${pinMode ? 'on' : ''}`} title={pinMode ? 'Cancel pin' : 'Add a comment pin on the drawing'} onClick={() => setPinMode(m => !m)}>
+                <MessageSquare size={15} />
               </button>
-              <button className="btn btn-ghost btn-sm btn-icon" title="Upload CRS" onClick={() => crsInputRef.current?.click()}>
-                <FileSpreadsheet size={16} />
+            )}
+            <button className="btn btn-ghost btn-icon" title="Download PDF (and CRS)" onClick={handleDownload}>
+              <Download size={15} />
+            </button>
+          </div>
+
+          {canDo('upload') && (
+            <div className="toolgroup">
+              <button className="btn btn-ghost btn-icon" title="Upload CRS Excel" onClick={() => crsInputRef.current?.click()}>
+                <FileSpreadsheet size={15} />
               </button>
               <input type="file" ref={crsInputRef} accept=".xlsx, .xls" style={{ display: 'none' }} onChange={handleCrsUpload} />
-              <button 
-                className="btn btn-ghost btn-sm btn-icon" 
-                title="Move to category" 
-                onClick={() => setShowMoveMenu(s => !s)}
-                style={{ color: showMoveMenu ? 'var(--primary-light)' : undefined }}
-              >
-                <FolderInput size={16} />
+              <button className={`btn btn-ghost btn-icon ${showMoveMenu ? 'on' : ''}`} title="Move to category" onClick={() => setShowMoveMenu(s => !s)}>
+                <FolderInput size={15} />
               </button>
-              {showMoveMenu && (
-                <div
-                  style={{
-                    position: 'absolute', right: 0, top: '100%', zIndex: 50, marginTop: '8px',
-                    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                    borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                    minWidth: '180px', overflow: 'hidden',
-                  }}
-                  onClick={e => e.stopPropagation()}
-                >
-                  <div style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                    Move to category
-                  </div>
-                  {DISCIPLINES.filter(d => d !== drawing.discipline).map(d => (
-                    <button
-                      key={d}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 14px', background: 'none', border: 'none',
-                        color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer',
-                      }}
-                      onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
-                      onMouseLeave={e => e.target.style.background = 'none'}
-                      onClick={() => {
-                        moveDrawingToDiscipline(drawing.id, d);
-                        setShowMoveMenu(false);
-                      }}
-                    >
-                      <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#6366f1', marginRight: 8 }} />
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              )}
               <button
-                className="btn btn-ghost btn-sm btn-icon"
+                className="btn btn-ghost btn-icon"
                 style={{ color: 'var(--error)' }}
                 title="Delete drawing"
                 onClick={() => {
-                  if (window.confirm(`Are you sure you want to delete drawing "${drawing.code}"?`)) {
-                    deleteDrawing(drawing.id);
-                  }
+                  if (window.confirm(`Are you sure you want to delete drawing "${drawing.code}"?`)) deleteDrawing(drawing.id);
                 }}
               >
-                <Trash2 size={16} />
+                <Trash2 size={15} />
               </button>
-              <button className="btn btn-accent btn-sm" onClick={() => setShowUploadModal(true)}>
-                <FileUp size={14} />
-                <span>Upload Revision</span>
-              </button>
-            </>
+            </div>
           )}
 
-          {canDo('approve') && (
-            <select
-              className="form-input"
-              value={drawing.status}
-              onChange={e => setDrawingStatus(drawingId, e.target.value)}
-              style={{ padding: '6px 10px', fontSize: '12px', width: 'auto' }}
-              title="Change drawing status"
+          {showMoveMenu && (
+            <div
+              style={{
+                position: 'absolute', right: 0, top: '100%', zIndex: 50, marginTop: 8,
+                background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                borderRadius: 10, boxShadow: 'var(--shadow-lg)', minWidth: 190, overflow: 'hidden',
+              }}
+              onClick={e => e.stopPropagation()}
             >
-              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+              <div style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                Move to category
+              </div>
+              {DISCIPLINES.filter(d => d !== drawing.discipline).map(d => (
+                <button
+                  key={d}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                  onClick={() => { moveDrawingToDiscipline(drawing.id, d); setShowMoveMenu(false); }}
+                >
+                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#94a3b8', marginRight: 8 }} />
+                  {d}
+                </button>
+              ))}
+            </div>
+          )}
+          {canDo('upload') && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowUploadModal(true)}>
+              <FileUp size={14} />
+              <span>Upload revision</span>
+            </button>
           )}
         </div>
       </div>
 
-      {/* Revision timeline */}
+      {/* Revisions + view switch */}
       <div className="revision-timeline">
-        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginRight: '8px', whiteSpace: 'nowrap' }}>REVISIONS</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginRight: 4, whiteSpace: 'nowrap' }}>Revisions</span>
         {sortedVersions.map((v, i) => (
           <React.Fragment key={v.version}>
             {i > 0 && <div className="revision-connector" />}
             <div
               className={`revision-node ${(activeVersion === v.version || (!activeVersion && i === 0)) ? 'active' : ''}`}
               onClick={() => setActiveVersion(v.version === sortedVersions[0].version ? null : v.version)}
-              title={v.changeSummary}
+              title={`${v.version} · ${v.date?.substring(0, 10)} · ${v.author || ''}\n${v.changeSummary || ''}`}
             >
               <span className="revision-node-ver">{v.version}</span>
-              <span className="revision-node-date">{v.date?.substring(0,10)}</span>
+              <span className="revision-node-date">{v.date?.substring(0, 10)}</span>
               <span className="revision-node-author">{v.author?.split(' ')[0]}</span>
             </div>
           </React.Fragment>
         ))}
-
-        <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-          Viewing: <strong style={{ color: 'var(--accent)' }}>{displayVersion?.version}</strong>
-          {' · '}{displayVersion?.changeSummary?.slice(0,60)}{displayVersion?.changeSummary?.length > 60 ? '…' : ''}
+        <span className="truncate" style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8, minWidth: 60, flex: '1 1 120px' }} title={displayVersion?.changeSummary}>
+          {displayVersion?.changeSummary}
+        </span>
+        <div className="seg" style={{ flexShrink: 0, marginLeft: 8 }}>
+          <button className={activeView === 'pdf' ? 'on' : ''} onClick={() => setActiveView('pdf')}>Drawing</button>
+          <button className={activeView === 'crs' ? 'on' : ''} onClick={() => setActiveView('crs')}>
+            CRS{drawing.crsData && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} title="CRS Excel attached" />}
+          </button>
+          <button className={activeView === 'split' ? 'on' : ''} onClick={() => setActiveView('split')}>Side by side</button>
         </div>
-      </div>
-
-      {/* Body */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)' }}>
         <button
-          className="btn btn-sm"
-          style={{ borderRadius: 0, background: activeView === 'pdf' ? 'var(--primary-glow)' : 'transparent', border: 'none', color: activeView === 'pdf' ? 'var(--primary-light)' : 'var(--text-muted)', borderBottom: activeView === 'pdf' ? '2px solid var(--primary-light)' : '2px solid transparent', padding: '10px 16px' }}
-          onClick={() => setActiveView('pdf')}
+          className={`comments-toggle ${showComments ? 'on' : ''}`}
+          onClick={() => setShowComments(s => !s)}
+          title={showComments ? 'Close comments' : 'Open comments'}
         >
-          Drawing PDF
-        </button>
-        <button
-          className="btn btn-sm"
-          style={{ borderRadius: 0, background: activeView === 'crs' ? 'var(--primary-glow)' : 'transparent', border: 'none', borderLeft: '1px solid var(--border)', color: activeView === 'crs' ? 'var(--primary-light)' : 'var(--text-muted)', borderBottom: activeView === 'crs' ? '2px solid var(--primary-light)' : '2px solid transparent', padding: '10px 16px' }}
-          onClick={() => setActiveView('crs')}
-        >
-          CRS {drawing.crsData && '✓'}
-        </button>
-        <button
-          className="btn btn-sm"
-          style={{ borderRadius: 0, background: activeView === 'split' ? 'var(--primary-glow)' : 'transparent', border: 'none', borderLeft: '1px solid var(--border)', color: activeView === 'split' ? 'var(--primary-light)' : 'var(--text-muted)', borderBottom: activeView === 'split' ? '2px solid var(--primary-light)' : '2px solid transparent', padding: '10px 16px' }}
-          onClick={() => setActiveView('split')}
-        >
-          Side by side
+          <MessageSquare size={14} />
+          <span>Comments</span>
+          {(drawing.pins?.length || 0) > 0 && (
+            <span className="comments-toggle-count" style={openPins ? undefined : { background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>
+              {openPins || drawing.pins.length}
+            </span>
+          )}
         </button>
       </div>
       <div className="drawing-body">
@@ -405,7 +368,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           <div className="comment-panel-header">
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Comments
-              <button className="btn btn-ghost btn-icon" title="Hide comments (show again with the speech-bubble icon above)" style={{ padding: 2 }} onClick={() => setShowComments(false)}>
+              <button className="btn btn-ghost btn-icon" title="Close comments (open again with the Comments button)" style={{ padding: 2 }} onClick={() => setShowComments(false)}>
                 <X size={13} />
               </button>
             </span>
@@ -419,7 +382,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
               <div className="empty-state" style={{ padding: '32px 16px' }}>
                 <div style={{ fontSize: '28px' }}>📌</div>
                 <div className="empty-state-desc" style={{ fontSize: '12px' }}>
-                  Click the comment icon in the header, then click on the drawing to place a pin.
+                  Click the speech-bubble pin tool in the toolbar, then click on the drawing where you want to comment.
                 </div>
               </div>
             ) : (
@@ -442,7 +405,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                     </div>
                     <span>Pin {pin.label}</span>
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>{pin.comments.length} comment{pin.comments.length !== 1 ? 's' : ''}</span>
-                    {pin.accepted && <span className="badge" style={{ background: 'var(--success)', color: '#000', fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Accepted</span>}
+                    {pin.accepted && <span className="badge badge-success" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Accepted</span>}
                     {pin.resolved && !pin.accepted && <span className="badge badge-muted" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Resolved</span>}
                     {canDo('upload') && (
                       <button
@@ -453,6 +416,23 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                         <CheckCheck size={13} />
                       </button>
                     )}
+                    {canDeleteComment(pin.comments?.[0]?.author || currentUser?.name) && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete pin ${pin.label} and all ${pin.comments.length} comment${pin.comments.length !== 1 ? 's' : ''} in it? This also removes it from the CRS Excel.`)) {
+                            if (activePinId === pin.id) setActivePinId(null);
+                            deletePin(drawingId, pin.id);
+                          }
+                        }}
+                        style={{ marginLeft: canDo('upload') ? 0 : 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px' }}
+                        title="Delete this pin and its comments"
+                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--error)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
 
                   {activePinId === pin.id && (
@@ -461,7 +441,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                         <div key={c.id} className="comment-bubble">
                           <div
                             className="avatar avatar-sm"
-                            style={{ background: '#6366f1', color: '#fff' }}
+                            style={{ background: 'var(--charcoal)', color: '#fff' }}
                           >
                             {c.author?.slice(0,2).toUpperCase()}
                           </div>
@@ -469,6 +449,18 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <span className="comment-author">{c.author}</span>
                               {c.type === 'client' && <span className="badge badge-warning" style={{ fontSize: '9px', padding: '1px 5px' }}>Client</span>}
+                              {canDeleteComment(c.author) && (
+                                <button
+                                  className="comment-delete"
+                                  title="Delete this comment"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    if (window.confirm('Delete this comment?')) deletePinComment(drawingId, pin.id, c.id);
+                                  }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
                             </div>
                             <div className="comment-date">{c.date}</div>
                             <div className="comment-text">{c.text}</div>
@@ -537,7 +529,6 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           onUploaded={() => setShowUploadModal(false)}
           uploadRevision={uploadRevision}
           uploadCRS={uploadCRS}
-          STATUSES={STATUSES}
           currentVersion={drawing.currentVersion}
         />
       )}
@@ -546,12 +537,11 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
 }
 
 // ─── Upload Revision Modal ──────────────────────────────────────────────────
-function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, uploadCRS, STATUSES, currentVersion }) {
+function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, uploadCRS, currentVersion }) {
   const [pdfFile, setPdfFile] = useState(null);
   const [crsFile, setCrsFile] = useState(null);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
   const [summary, setSummary] = useState('');
-  const [status, setStatus] = useState(drawing.status);
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -656,7 +646,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
       const blobPath = `drawings/${drawing.code.trim().toUpperCase()}/${pdfFile.name}`;
       const blob = await uploadFile(blobPath, pdfFile);
       
-      uploadRevision(drawing.id, summary, blob.url, status);
+      uploadRevision(drawing.id, summary, blob.url);
       if (crsFile) {
         try {
           const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, crsFile), readCrs(crsFile)]);
@@ -724,7 +714,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
           {parsed && !parsing && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px 14px', background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 'var(--r-md)', marginTop: '12px', fontSize: '12px' }}>
               <span style={{ color: 'var(--success)', fontWeight: 700 }}>📄 Extracted from PDF:</span>
-              {parsed.dwgNo && <span style={{ background: 'rgba(6,182,212,0.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>No. {parsed.dwgNo}</span>}
+              {parsed.dwgNo && <span style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)', padding: '2px 8px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>No. {parsed.dwgNo}</span>}
               {parsed.title && <span style={{ color: 'var(--text-secondary)' }}>— {parsed.title.slice(0,60)}</span>}
               {parsed.rev && <span style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--warning)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>Rev {parsed.rev}</span>}
               {!parsed.dwgNo && !parsed.title && !parsed.rev && <span style={{ color: 'var(--text-muted)' }}>No structured data found in PDF title block.</span>}
@@ -745,17 +735,6 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
               placeholder={`Describe what changed in ${nextVer}…`}
               rows={3}
             />
-          </div>
-
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Update Drawing Status</label>
-            <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>
-              {STATUSES.map(s => <option key={s} value={s}>{s} — {
-                s === 'IFR' ? 'Issued for Review' :
-                s === 'IFA' ? 'Issued for Approval' :
-                s === 'AFC' ? 'Approved for Construction' : 'Superseded'
-              }</option>)}
-            </select>
           </div>
         </div>
 

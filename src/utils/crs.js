@@ -200,7 +200,7 @@ export function buildCrsTable(drawing) {
  * - pins and comments added in the app go into the next free rows (and stay there)
  * Returns { cells: [{r, c, v}] (absolute, 0-based), rowMap, layout }.
  */
-export function planCrsWrites(layout, table, rowMap = {}) {
+export function planCrsWrites(layout, table, rowMap = {}, clearRows = []) {
   const lay = { ...layout, cols: { ...layout.cols } };
   const o = lay.origin || { r: 0, c: 0 };
   const cells = [];
@@ -212,6 +212,11 @@ export function planCrsWrites(layout, table, rowMap = {}) {
     if (lay.cols[k] === undefined) { lay.cols[k] = nextCol++; set(header, lay.cols[k], label); }
   }
   lay.maxCol = Math.max(lay.maxCol ?? 0, o.c + nextCol - 1);
+
+  // blank out rows whose comments were deleted in the app
+  for (const row of clearRows) {
+    for (const k of ['comment', 'commentBy', 'reply', 'status', 'pin', 'page', 'date', 'replyBy', 'source']) set(row, lay.cols[k], '');
+  }
 
   const map = { ...rowMap };
   const used = new Set(Object.values(map));
@@ -227,6 +232,12 @@ export function planCrsWrites(layout, table, rowMap = {}) {
       continue;
     }
     let row = map[r.key];
+    if (!String(r.comment || '').trim() && !String(r.reply || '').trim()) {
+      // nothing written yet (e.g. a pin just placed): keep it out of the Excel,
+      // and blank its row if it was written there before
+      if (row !== undefined) for (const k of ['comment', 'commentBy', 'reply', 'status', 'pin', 'page', 'date', 'replyBy', 'source']) set(row, lay.cols[k], '');
+      continue;
+    }
     if (row === undefined) {
       const slot = free.shift();
       if (slot) {
@@ -304,7 +315,7 @@ export function crsWorkbook(drawing, project, { emptyTable = false } = {}) {
     ['Drawing No.', drawing.code],
     ['Drawing Title', drawing.title],
     ['Revision', drawing.currentVersion || ''],
-    ['Status', drawing.status || ''],
+    ['Category', drawing.discipline || ''],
     ['Generated', new Date().toISOString().slice(0, 10)],
     [],
     CRS_COLUMNS,
@@ -382,7 +393,8 @@ export async function syncCrsExcel(drawing, project) {
     rowMap = {};
     created = true;
   }
-  const plan = planCrsWrites(layout, table, rowMap);
+  const clearRows = created ? [] : (drawing.crsClearRows || []);
+  const plan = planCrsWrites(layout, table, rowMap, clearRows);
   const out = await applyCrsCells(bytes, plan.cells);
-  return { bytes: out, rowMap: plan.rowMap, layout: plan.layout, created };
+  return { bytes: out, rowMap: plan.rowMap, layout: plan.layout, created, clearedRows: clearRows };
 }
