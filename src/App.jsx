@@ -8,7 +8,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
 import { AccessDenied } from './components/AccessDenied';
 import { AuthGate, clerkEnabled, Splash } from './auth';
-import { Menu, Zap } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { PasswordLogin } from './components/PasswordLogin';
 import { ChangePassword } from './components/ChangePassword';
 
@@ -96,7 +96,7 @@ function AppShell() {
       <div className="main-content">
         <div className="mobile-topbar">
           <button className="btn btn-ghost btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
-          <div className="mobile-topbar-brand"><span className="sidebar-brand-icon" style={{ width: 26, height: 26 }}><Zap size={14} color="#fff" /></span> Tranzenergy</div>
+          <div className="mobile-topbar-brand"><img src="/logo-mark.png" alt="" style={{ width: 32, height: 32 }} /> Tranz Energy</div>
         </div>
         {cloudStatus === 'offline' && (
           <div style={{ background: 'var(--error-glow)', color: 'var(--error)', fontSize: 12, padding: '6px 16px', borderBottom: '1px solid rgba(239,68,68,0.3)' }}>

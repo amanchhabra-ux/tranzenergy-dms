@@ -24,12 +24,9 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
     <div className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       {/* Brand */}
       <div className="sidebar-brand">
-        <div className="sidebar-brand-icon">
-          <Zap size={18} color="#fff" />
-        </div>
-        <div>
-          <div className="sidebar-brand-text">Tranzenergy</div>
-          <div className="sidebar-brand-sub">v2 · Engineering DMS</div>
+        <div className="sidebar-brand-logo">
+          <img src="/logo.png" alt="Tranz Energy" />
+          <div className="sidebar-brand-sub">Engineering DMS</div>
         </div>
       </div>
 

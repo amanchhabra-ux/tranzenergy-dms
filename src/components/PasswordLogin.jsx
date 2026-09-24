@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap, Eye, EyeOff, LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 
 export function PasswordLogin() {
   const [email, setEmail] = useState('');
@@ -28,12 +28,9 @@ export function PasswordLogin() {
     <div className="login-page-modern">
       <div className="login-animated-bg" />
       <div className="login-glass-card">
-        <div className="login-brand-modern">
-          <div className="login-brand-icon-modern"><Zap size={32} color="#fff" /></div>
-          <div>
-            <div className="login-brand-name-modern">Tranzenergy</div>
-            <div className="login-brand-sub-modern">Enterprise Document Control</div>
-          </div>
+        <div className="login-brand-modern login-brand-logo">
+          <img src="/logo.png" alt="Tranz Energy" />
+          <div className="login-brand-sub-modern">Enterprise Document Control</div>
         </div>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>

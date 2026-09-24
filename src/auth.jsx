@@ -1,6 +1,5 @@
 import React from 'react';
 import { ClerkProvider, SignIn, useAuth, useUser } from '@clerk/clerk-react';
-import { Zap } from 'lucide-react';
 
 // Sign-in with Clerk (Google, Microsoft, email code). Switched on by setting
 // VITE_CLERK_PUBLISHABLE_KEY in Vercel; without it the old email login is used.
@@ -42,12 +41,9 @@ function SignInPage() {
     <div className="login-page-modern">
       <div className="login-animated-bg" />
       <div className="login-glass-card" style={{ padding: '40px 36px 28px' }}>
-        <div className="login-brand-modern" style={{ marginBottom: 20 }}>
-          <div className="login-brand-icon-modern"><Zap size={32} color="#fff" /></div>
-          <div>
-            <div className="login-brand-name-modern">Tranzenergy</div>
-            <div className="login-brand-sub-modern">Enterprise Document Control</div>
-          </div>
+        <div className="login-brand-modern login-brand-logo" style={{ marginBottom: 20 }}>
+          <img src="/logo.png" alt="Tranz Energy" />
+          <div className="login-brand-sub-modern">Enterprise Document Control</div>
         </div>
         <p style={{ textAlign: 'center', fontSize: 14, color: 'var(--text-muted)', margin: '0 0 8px' }}>
           Sign in with Google, Microsoft or your work email
