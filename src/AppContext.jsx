@@ -735,6 +735,7 @@ export function AppProvider({ children }) {
       moveDrawingToDiscipline,
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
       canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
+      saveNow: pushToCloud,
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Users

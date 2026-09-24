@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { StorageMigration } from './StorageMigration';
+import { isStoredFile } from '../utils/uploadFile';
 import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload } from 'lucide-react';
 
 const ROLE_COLORS = {
@@ -11,7 +12,7 @@ const ROLE_COLORS = {
 const AVATAR_COLORS = ['#ea580c','#27272a','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#c2410c','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow } = useContext(AppContext);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -74,13 +75,41 @@ export function AdminPanel({ initialTab = 'users' }) {
     };
   };
 
-  const handleResetInstance = () => {
-    if (!window.confirm("Are you absolutely sure you want to delete all projects, drawings, comments, proposals, and logs? This will reset the workspace for all users!")) {
-      return;
-    }
-    setImportStatus('Resetting workspace...');
+  // Fresh start: delete every stored file, then clear the workspace for everyone
+  const handleResetInstance = async () => {
+    const files = new Set();
+    drawings.forEach(d => {
+      [d.pdfData, d.crsData, d.crsPdf, ...(d.versions || []).map(v => v.pdfData)].forEach(u => { if (isStoredFile(u)) files.add(u); });
+    });
+    proposals.forEach(p => { if (isStoredFile(p.fileData)) files.add(p.fileData); });
+
+    const typed = window.prompt(
+      `This permanently deletes ALL ${projects.length} projects, ${drawings.length} drawings, ${proposals.length} proposals, ` +
+      `every comment and log, ${files.size} stored files, and every user except the 5 built-in accounts.\n\n` +
+      'It cannot be undone. Type RESET to continue.'
+    );
+    if (typed !== 'RESET') { setImportStatus('Reset cancelled.'); return; }
+
     try {
-      const cleanData = {
+      // 1. delete the stored files
+      const list = [...files];
+      let done = 0, failed = 0;
+      const worker = async () => {
+        while (list.length) {
+          const url = list.shift();
+          try {
+            const r = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+            if (!r.ok) failed++;
+          } catch { failed++; }
+          done++;
+          setImportStatus(`Deleting stored files… ${done} / ${files.size}`);
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+
+      // 2. clear the workspace
+      setImportStatus('Clearing the workspace…');
+      importWorkspaceData({
         users: [
           { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#ea580c' },
           { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#27272a' },
@@ -91,14 +120,14 @@ export function AdminPanel({ initialTab = 'users' }) {
         projects: [],
         drawings: [],
         proposals: [],
-        activityLog: [],
-        disciplines: ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural']
-      };
-      importWorkspaceData(cleanData);
-      setImportStatus('✓ Workspace has been reset successfully! Page will refresh in 2 seconds.');
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+        activityLog: [{ id: `log-${Date.now()}`, message: 'Workspace reset — fresh start.', author: currentUser?.name || 'Admin', time: new Date().toISOString() }],
+        disciplines: ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural', 'Other'],
+      });
+
+      // 3. make sure the shared database has saved before saying we're done
+      await new Promise(r => setTimeout(r, 400));
+      await saveNow();
+      setImportStatus(`✓ Workspace reset. ${files.size - failed} file(s) deleted${failed ? `, ${failed} could not be deleted` : ''}. Everyone else will see the empty workspace within a few seconds.`);
     } catch (err) {
       setImportStatus('⚠️ Reset failed: ' + err.message);
     }
@@ -340,7 +369,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                   <div>
                     <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0', color: '#dc2626' }}>3. Reset Instance</h4>
                     <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
-                      Delete all projects, drawings, and comments globally.
+                      Delete all projects, drawings, proposals, comments, logs and stored files, and every user except the 5 built-in accounts.
                       <span style={{ color: '#dc2626', display: 'block', marginTop: '4px', fontWeight: 500 }}>Warning: Clears data for all users!</span>
                     </p>
                   </div>
