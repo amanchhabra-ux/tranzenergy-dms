@@ -1,12 +1,17 @@
-import { requireUser, authEnabled } from './_lib/auth.js';
-import { memberEmails } from './_lib/state.js';
+import { signedInUser, clerkEnabled } from './_lib/auth.js';
+import { memberMap } from './_lib/state.js';
 
-// Who am I, and am I allowed in?  → { authEnabled, email, name, isAdminEmail, isMember }
+// → { mode, signedIn, email, mustChangePassword, isMember, role }
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!authEnabled()) return res.status(200).json({ authEnabled: false });
-  const who = await requireUser(req, res, { members: false });
-  if (!who) return;
-  const isMember = (await memberEmails()).has(who.email);
-  return res.status(200).json({ authEnabled: true, email: who.email, name: who.name, isAdminEmail: who.isAdminEmail, isMember });
+  const mode = clerkEnabled() ? 'clerk' : 'password';
+  let who = null;
+  try { who = await signedInUser(req); } catch (e) { console.error(e); }
+  if (!who?.email) return res.status(200).json({ mode, signedIn: false, authEnabled: mode === 'clerk' });
+  const user = (await memberMap()).get(who.email);
+  return res.status(200).json({
+    mode, authEnabled: true, signedIn: true, email: who.email, name: who.name || user?.name,
+    mustChangePassword: !!who.mustChangePassword, isMember: !!user, role: user?.role || null,
+    isAdminEmail: user?.role === 'Admin',
+  });
 }

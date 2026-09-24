@@ -96,8 +96,9 @@ function saveState(data) {
 
 // authMode 'clerk': people sign in with Clerk (Google / Microsoft / email code) and are
 // matched to a workspace user by email. authMode 'legacy': the old email login.
-export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', onSignOut }) {
+export function AppProvider({ children, authMode = 'password', clerkEmail = '', onSignOut }) {
   const clerkMode = authMode === 'clerk';
+  const managed = authMode === 'clerk' || authMode === 'password'; // sign-in handled by the server
   const saved = loadState();
 
   // Patch existing localStorage so the user name updates for returning users
@@ -116,7 +117,9 @@ export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', on
   }
 
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(clerkMode ? null : (saved?.currentUser || null));
+  const [currentUser, setCurrentUser] = useState(managed ? null : (saved?.currentUser || null));
+  const [needsLogin, setNeedsLogin] = useState(false);       // password mode: not signed in
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [me, setMe] = useState(null);                 // server's view of the signed-in person (clerk mode)
   const [accessDenied, setAccessDenied] = useState(null); // { email } when signed in but not a member
   const [users,       setUsers]       = useState(saved?.users ? recolorUsers(saved.users) : SEED_USERS);
@@ -231,14 +234,16 @@ export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', on
   // First load
   useEffect(() => {
     (async () => {
-      if (clerkMode) {
+      if (managed) {
         try {
           const r = await fetch('/api/me', { cache: 'no-store' });
           const m = await r.json().catch(() => ({}));
-          if (r.ok && m.authEnabled) {
+          if (!clerkMode && r.ok && !m.signedIn) { setNeedsLogin(true); setLoading(false); return; }
+          if (!clerkMode && m.mustChangePassword) { setMustChangePassword(true); setLoading(false); return; }
+          if (r.ok && m.signedIn !== false && m.email) {
             setMe(m);
             if (!m.isMember && !m.isAdminEmail) { setAccessDenied({ email: m.email }); setLoading(false); return; }
-          } else if (r.status === 401) {
+          } else if (clerkMode && r.status === 401) {
             onSignOut?.(); return;
           }
         } catch { /* fall through; the cloud load will report problems */ }
@@ -295,11 +300,17 @@ export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', on
     setCurrentUser(null);
     addLog(`${name} signed out.`);
     if (clerkMode) setTimeout(() => onSignOut?.(), 1800); // let the log entry save first
+    if (authMode === 'password') {
+      setTimeout(async () => {
+        try { await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }); } catch { /* ignore */ }
+        window.location.reload();
+      }, 1800);
+    }
   };
 
   // Clerk mode: link the signed-in email to its workspace user (first admin is added automatically)
   useEffect(() => {
-    if (!clerkMode || loading || accessDenied) return;
+    if (!managed || loading || accessDenied) return;
     const email = (me?.email || clerkEmail || '').toLowerCase();
     if (!email) return;
     const u = users.find(x => String(x.email || '').trim().toLowerCase() === email);
@@ -765,7 +776,7 @@ export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', on
     <AppContext.Provider value={{
       // State
       currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
-      authMode, accessDenied, onSignOut,
+      authMode, accessDenied, onSignOut, needsLogin, mustChangePassword,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth

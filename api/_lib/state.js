@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { list, get } from '@vercel/blob';
 
 export const STATE_PATH = 'db_state_v5.json';
@@ -6,6 +8,10 @@ export const strongEtag = (e) => (e ? String(e).replace(/^W\//, '') : '');
 
 /** Read the workspace document. → { notFound } | { notModified, etag } | { text, etag } */
 export async function readState(knownEtag) {
+  if (process.env.LOCAL_DATA_DIR) {
+    const f = path.join(process.env.LOCAL_DATA_DIR, 'db_state.json');
+    return fs.existsSync(f) ? { text: fs.readFileSync(f, 'utf8'), etag: null } : { notFound: true };
+  }
   const { blobs } = await list({ prefix: STATE_PATH });
   const stateBlob = blobs.find(b => b.pathname === STATE_PATH);
   if (!stateBlob) return { notFound: true };
@@ -17,14 +23,15 @@ export async function readState(knownEtag) {
   return { text, etag };
 }
 
-// Emails of everyone added as a user in the workspace (cached briefly per server instance)
-let memberCache = { at: 0, emails: null };
-export async function memberEmails() {
-  if (memberCache.emails && Date.now() - memberCache.at < 60_000) return memberCache.emails;
+// Workspace users by email (cached briefly per server instance)
+let memberCache = { at: 0, map: null };
+export async function memberMap() {
+  if (memberCache.map && Date.now() - memberCache.at < 30_000) return memberCache.map;
   const r = await readState();
   const users = r.text ? (JSON.parse(r.text).users || []) : [];
-  const emails = new Set(users.map(u => String(u.email || '').trim().toLowerCase()).filter(Boolean));
-  memberCache = { at: Date.now(), emails };
-  return emails;
+  const map = new Map(users.filter(u => u.email).map(u => [String(u.email).trim().toLowerCase(), u]));
+  memberCache = { at: Date.now(), map };
+  return map;
 }
-export function forgetMembers() { memberCache = { at: 0, emails: null }; }
+export async function memberEmails() { return new Set((await memberMap()).keys()); }
+export function forgetMembers() { memberCache = { at: 0, map: null }; }

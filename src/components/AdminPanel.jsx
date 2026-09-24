@@ -2,7 +2,8 @@ import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { StorageMigration } from './StorageMigration';
 import { isStoredFile } from '../utils/uploadFile';
-import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload } from 'lucide-react';
+import { UserPasswordModal, generatePassword, setUserPassword } from './UserPasswordModal';
+import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound } from 'lucide-react';
 
 const ROLE_COLORS = {
   'Admin': '#ea580c', 'Project Manager': '#27272a',
@@ -16,15 +17,34 @@ export function AdminPanel({ initialTab = 'users' }) {
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
-  const [form, setForm] = useState({ name: '', email: '', role: 'Engineer' });
+  const [form, setForm] = useState({ name: '', email: '', role: 'Engineer', password: generatePassword() });
+  const [pwUser, setPwUser] = useState(null);          // user whose password is being set
+  const [pwStatus, setPwStatus] = useState({});        // email → date set
+  const [addError, setAddError] = useState('');
+  const loadPwStatus = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin-password', { cache: 'no-store' });
+      if (r.ok) setPwStatus((await r.json()).hasPassword || {});
+    } catch { /* ignore */ }
+  }, []);
+  React.useEffect(() => { loadPwStatus(); }, [loadPwStatus]);
   const [manageUsersProjectId, setManageUsersProjectId] = useState(null);
   const [importStatus, setImportStatus] = useState('');
 
-  const handleAddUser = (e) => {
+  const handleAddUser = async (e) => {
     e.preventDefault();
+    setAddError('');
+    const email = form.email.trim().toLowerCase();
+    if (users.some(u => String(u.email || '').toLowerCase() === email)) { setAddError('A user with this email already exists.'); return; }
+    try {
+      await setUserPassword(email, form.password);
+    } catch (err) { setAddError(err.message); return; }
     const color = AVATAR_COLORS[users.length % AVATAR_COLORS.length];
-    createUser({ ...form, avatar: form.name.slice(0,2).toUpperCase(), color });
-    setForm({ name:'', email:'', role:'Engineer' });
+    const { password: _pw, ...rest } = form;
+    createUser({ ...rest, email, avatar: form.name.slice(0,2).toUpperCase(), color });
+    loadPwStatus();
+    alert(`${form.name} added.\n\nSign-in email: ${email}\nPassword: ${form.password}\n\nShare these with them; they can change the password after signing in.`);
+    setForm({ name:'', email:'', role:'Engineer', password: generatePassword() });
     setShowAddUser(false);
   };
 
@@ -225,11 +245,21 @@ export function AdminPanel({ initialTab = 'users' }) {
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                          <span style={{ fontSize: 11, alignSelf: 'center', marginRight: 6, color: pwStatus[String(u.email || '').toLowerCase()] ? 'var(--success)' : 'var(--warning)' }}>
+                            {pwStatus[String(u.email || '').toLowerCase()] ? 'Password set' : 'No password'}
+                          </span>
+                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setPwUser(u)} title={pwStatus[String(u.email || '').toLowerCase()] ? 'Reset password' : 'Set password'}>
+                            <KeyRound size={13} />
+                          </button>
                           <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditUserId(u.id)} title="Edit role">
                             <Edit2 size={13} />
                           </button>
                           {u.id !== currentUser.id && (
-                            <button className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--error)' }} onClick={() => { if (window.confirm(`Remove ${u.name}?`)) deleteUser(u.id); }} title="Remove user">
+                            <button className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--error)' }} onClick={() => {
+                              if (!window.confirm(`Remove ${u.name}? They will no longer be able to sign in.`)) return;
+                              fetch('/api/admin-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: u.email, remove: true }) }).then(loadPwStatus).catch(() => {});
+                              deleteUser(u.id);
+                            }} title="Remove user">
                               <Trash2 size={13} />
                             </button>
                           )}
@@ -409,12 +439,21 @@ export function AdminPanel({ initialTab = 'users' }) {
                   <label className="form-label">Email *</label>
                   <input className="form-input" type="email" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} placeholder="name@tranzenergy.in" required />
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
+                <div className="form-group">
                   <label className="form-label">Role *</label>
                   <select className="form-input" value={form.role} onChange={e => setForm(f=>({...f,role:e.target.value}))}>
                     {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Password *</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input className="form-input" value={form.password} onChange={e => setForm(f=>({...f,password:e.target.value}))} required style={{ fontFamily: 'var(--font-mono)' }} />
+                    <button type="button" className="btn btn-secondary btn-icon" title="Generate a password" onClick={() => setForm(f=>({...f,password:generatePassword()}))}>↻</button>
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>At least 8 characters with letters and a number. They can change it after signing in.</span>
+                </div>
+                {addError && <div style={{ fontSize: 13, color: 'var(--error)', background: 'var(--error-glow)', padding: '8px 12px', borderRadius: 8, marginTop: 12 }}>{addError}</div>}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAddUser(false)}>Cancel</button>
@@ -424,6 +463,8 @@ export function AdminPanel({ initialTab = 'users' }) {
           </div>
         </div>
       )}
+
+      {pwUser && <UserPasswordModal user={pwUser} onClose={() => setPwUser(null)} onSaved={loadPwStatus} />}
 
       {manageUsersProjectId && (
         <ManageProjectUsersModal

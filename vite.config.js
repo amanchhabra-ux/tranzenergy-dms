@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import os from 'node:os'
 
 // ─── Local dev storage ──────────────────────────────────────────────────────
 // Only active for `npm run dev`. Stands in for the /api functions so that the
@@ -33,6 +34,23 @@ function localDevStorage() {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost')
+        // Sign-in endpoints: run the real API handlers against local files
+        if (['/api/auth', '/api/me', '/api/admin-password'].includes(url.pathname)) {
+          process.env.LOCAL_DATA_DIR = root
+          process.env.LOCAL_SESSION_SECRET = process.env.LOCAL_SESSION_SECRET || 'local-dev-only'
+          try {
+            const mod = await server.ssrLoadModule(url.pathname + '.js')
+            const raw = req.method === 'POST' ? (await readBody(req)).toString('utf8') : ''
+            req.body = raw ? JSON.parse(raw) : {}
+            req.query = Object.fromEntries(url.searchParams)
+            res.status = (c) => { res.statusCode = c; return res }
+            res.json = (o) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); return res }
+            res.send = (t) => { res.end(t); return res }
+            return await mod.default(req, res)
+          } catch (e) {
+            return json(res, 500, { error: e.message })
+          }
+        }
         try {
           const etagOf = (text) => '"' + crypto.createHash('sha1').update(text).digest('hex') + '"'
           if (url.pathname === '/api/get-state' && req.method === 'GET') {
@@ -88,4 +106,6 @@ function localDevStorage() {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), localDevStorage()],
+  // keep Vite's cache out of the project folder (iCloud-synced folders lock files mid-write)
+  cacheDir: path.join(os.tmpdir(), 'vite-tranzenergy-dms'),
 })

@@ -1,23 +1,24 @@
 import { createClerkClient } from '@clerk/backend';
-import { memberEmails } from './state.js';
+import { memberMap } from './state.js';
+import { readSession } from './session.js';
+import { readCreds } from './creds.js';
 
-// Sign-in checks for the API.
-// Turned on when CLERK_SECRET_KEY is set in Vercel. Until then every request is allowed
-// (the previous behaviour), so the site keeps working while sign-in is being set up.
-export const authEnabled = () => !!process.env.CLERK_SECRET_KEY;
+// Two sign-in modes:
+//  - Clerk (Google / Microsoft / email code) when CLERK_SECRET_KEY is set — currently on hold
+//  - Otherwise: email + password accounts created by the admin (default)
+export const clerkEnabled = () => !!process.env.CLERK_SECRET_KEY;
+export const authEnabled = () => true;
 
-// Emails that are always allowed in as Admin (so the first admin can get in before anyone is added)
 export const adminEmails = () =>
   new Set(String(process.env.ADMIN_EMAILS || '').split(/[,\s;]+/).map(e => e.trim().toLowerCase()).filter(Boolean));
 
+// ── Clerk (on hold) ──────────────────────────────────────────────────────
 let clerk;
-const client = () => (clerk ||= createClerkClient({
+const clerkClient = () => (clerk ||= createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY,
   publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY,
 }));
-
-const emailCache = new Map(); // userId → { email, name, at }
-
+const emailCache = new Map();
 function toFetchRequest(req) {
   const proto = req.headers['x-forwarded-proto'] || 'https';
   const host = req.headers['x-forwarded-host'] || req.headers.host;
@@ -25,40 +26,50 @@ function toFetchRequest(req) {
   for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(', ') : String(v));
   return new Request(`${proto}://${host}${req.url}`, { method: 'GET', headers });
 }
-
-/** Who is making this request? → { email, name } or null */
-export async function signedInUser(req) {
-  const state = await client().authenticateRequest(toFetchRequest(req), {
-    authorizedParties: undefined,
-  });
+async function clerkUser(req) {
+  const state = await clerkClient().authenticateRequest(toFetchRequest(req));
   if (!state.isSignedIn) return null;
   const { userId } = state.toAuth();
   const hit = emailCache.get(userId);
   if (hit && Date.now() - hit.at < 5 * 60_000) return hit;
-  const u = await client().users.getUser(userId);
+  const u = await clerkClient().users.getUser(userId);
   const primary = u.emailAddresses.find(e => e.id === u.primaryEmailAddressId) || u.emailAddresses[0];
-  const info = {
-    email: String(primary?.emailAddress || '').toLowerCase(),
-    name: [u.firstName, u.lastName].filter(Boolean).join(' ') || primary?.emailAddress || 'User',
-    at: Date.now(),
-  };
+  const info = { email: String(primary?.emailAddress || '').toLowerCase(), name: [u.firstName, u.lastName].filter(Boolean).join(' '), at: Date.now() };
   emailCache.set(userId, info);
   return info;
 }
 
+// ── Password sessions ───────────────────────────────────────────────────
+async function sessionUser(req) {
+  const s = readSession(req);
+  if (!s) return null;
+  // a password change/reset signs out older sessions
+  const { data } = await readCreds();
+  const rec = data.users?.[s.email];
+  if (rec && (rec.pwv || 0) !== (s.pwv || 0)) return null;
+  if (!rec && !s.bootstrap && s.pwv !== -1) return null;
+  return { email: s.email, mustChangePassword: s.pwv === -1 };
+}
+
+/** Who is signed in? → { email, name?, mustChangePassword? } or null */
+export async function signedInUser(req) {
+  return clerkEnabled() ? clerkUser(req) : sessionUser(req);
+}
+
 /**
- * Guard for API routes. Returns the caller ({ email, name, isAdminEmail }) or sends 401/403 and returns null.
- * `members: false` skips the "must be an added user" check (used by /api/me).
+ * Guard for API routes. Returns { email, user, role, isAdmin } or sends 401/403 and returns null.
+ *  members: false → only needs to be signed in (used by /api/me)
+ *  admin: true    → must be an Admin
  */
-export async function requireUser(req, res, { members = true } = {}) {
-  if (!authEnabled()) return { email: null, legacy: true };
+export async function requireUser(req, res, { members = true, admin = false } = {}) {
   let who;
   try { who = await signedInUser(req); } catch (e) { console.error('auth error', e); who = null; }
   if (!who || !who.email) { res.status(401).json({ error: 'signed_out' }); return null; }
-  const isAdminEmail = adminEmails().has(who.email);
-  if (members && !isAdminEmail) {
-    const emails = await memberEmails();
-    if (!emails.has(who.email)) { res.status(403).json({ error: 'no_access', email: who.email }); return null; }
-  }
-  return { ...who, isAdminEmail };
+  const map = await memberMap();
+  const user = map.get(who.email) || null;
+  const isAdmin = user?.role === 'Admin' || adminEmails().has(who.email);
+  if (members && !user && !isAdmin) { res.status(403).json({ error: 'no_access', email: who.email }); return null; }
+  if (who.mustChangePassword && members) { res.status(403).json({ error: 'must_change_password' }); return null; }
+  if (admin && !isAdmin) { res.status(403).json({ error: 'admin_only' }); return null; }
+  return { ...who, user, role: user?.role || (isAdmin ? 'Admin' : null), isAdmin };
 }

@@ -8,9 +8,11 @@ import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
 import { AccessDenied } from './components/AccessDenied';
 import { AuthGate, clerkEnabled, Splash } from './auth';
+import { PasswordLogin } from './components/PasswordLogin';
+import { ChangePassword } from './components/ChangePassword';
 
 function AppShell() {
-  const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut } = useContext(AppContext);
+  const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut, needsLogin, mustChangePassword, logout } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
 
@@ -46,6 +48,12 @@ function AppShell() {
     );
   }
 
+  if (authMode === 'password') {
+    if (needsLogin) return <PasswordLogin />;
+    if (mustChangePassword) return <ChangePassword forced />;
+    if (accessDenied) return <AccessDenied email={accessDenied.email} onSignOut={logout} />;
+    if (!currentUser) return <Splash text="Opening your workspace…" />;
+  }
   if (authMode === 'clerk') {
     if (accessDenied) return <AccessDenied email={accessDenied.email} onSignOut={onSignOut} />;
     if (!currentUser) return <Splash text="Opening your workspace…" />;
@@ -95,7 +103,7 @@ function AppShell() {
 export default function App() {
   if (!clerkEnabled) {
     return (
-      <AppProvider>
+      <AppProvider authMode="password">
         <AppShell />
       </AppProvider>
     );

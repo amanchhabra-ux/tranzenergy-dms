@@ -1,9 +1,9 @@
 import React, { useContext } from 'react';
 import { AppContext } from '../AppContext';
+import { ChangePassword } from './ChangePassword';
 import {
   LayoutDashboard, Zap, FolderOpen, Radio, Wind,
-  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database
-} from 'lucide-react';
+  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database, KeyRound } from 'lucide-react';
 
 const TYPE_META = {
   transmission: { label: 'Transmission', icon: Zap,     color: '#27272a' },
@@ -13,7 +13,8 @@ const TYPE_META = {
 };
 
 export function Sidebar({ activeView, activeProjectId, onNavigate }) {
-  const { currentUser, projects, drawings, canDo, logout } = useContext(AppContext);
+  const { currentUser, projects, drawings, canDo, logout, authMode } = useContext(AppContext);
+  const [showPw, setShowPw] = React.useState(false);
 
   const filteredProjects = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
 
@@ -99,7 +100,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate }) {
 
       {/* User footer */}
       <div className="sidebar-footer">
-        <div className="sidebar-user" onClick={logout} title="Sign out">
+        <div className="sidebar-user" style={{ cursor: 'default' }}>
           <div className="avatar" style={{ background: currentUser.color, color: '#fff', fontSize: '11px' }}>
             {currentUser.avatar}
           </div>
@@ -107,8 +108,16 @@ export function Sidebar({ activeView, activeProjectId, onNavigate }) {
             <div className="sidebar-user-name truncate">{currentUser.name}</div>
             <div className="sidebar-user-role">{currentUser.role}</div>
           </div>
-          <LogOut size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          {authMode === 'password' && (
+            <button className="btn btn-ghost btn-icon" title="Change password" onClick={() => setShowPw(true)} style={{ padding: 5 }}>
+              <KeyRound size={14} />
+            </button>
+          )}
+          <button className="btn btn-ghost btn-icon" title="Sign out" onClick={logout} style={{ padding: 5 }}>
+            <LogOut size={14} />
+          </button>
         </div>
+        {showPw && <ChangePassword onClose={() => setShowPw(false)} onDone={() => { setShowPw(false); alert('Password changed.'); }} />}
       </div>
     </div>
   );
