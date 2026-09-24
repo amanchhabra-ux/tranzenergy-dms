@@ -433,6 +433,19 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     }));
   };
 
+  const moveDrawingToProject = (drawingId, targetProjectId) => {
+    if (!canDo('upload')) return false;
+    const target = projects.find(p => p.id === targetProjectId);
+    if (!target) return false;
+    if (currentUser?.role !== 'Admin' && !target.assignedUsers?.includes(currentUser?.id)) return false;
+    const d = drawings.find(x => x.id === drawingId);
+    if (!d || d.projectId === targetProjectId) return false;
+    const from = projects.find(p => p.id === d.projectId);
+    setDrawings(prev => prev.map(x => x.id === drawingId ? { ...x, projectId: targetProjectId } : x));
+    addLog(`Drawing <strong>${d.code}</strong> moved from <strong>${from?.code || from?.name || 'project'}</strong> to <strong>${target.code || target.name}</strong>.`);
+    return true;
+  };
+
   const addDiscipline = (name) => {
     if (!canDo('upload')) return;
     const trimmed = name.trim();
@@ -789,7 +802,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       createProject, updateProject, deleteProject, assignUsersToProject,
       // Drawings
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
-      moveDrawingToDiscipline,
+      moveDrawingToDiscipline, moveDrawingToProject,
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
       canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
       saveNow: pushToCloud,

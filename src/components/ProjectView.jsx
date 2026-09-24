@@ -1,4 +1,5 @@
 import React, { useContext, useState, useRef } from 'react';
+import { MoveMenu } from './MoveMenu';
 import { AppContext } from '../AppContext';
 import { DrawingDetail } from './DrawingDetail';
 import { MDLView } from './MDLView';
@@ -213,7 +214,7 @@ export function ProjectView({ projectId, onBack }) {
                       {canDo('upload') && (
                         <button
                           className="btn btn-ghost btn-icon"
-                          title="Move to category"
+                          title="Move to category or project"
                           style={{ padding: '2px', opacity: 0.5, width: '20px', height: '20px' }}
                           onClick={(e) => { e.stopPropagation(); setMovingDrawingId(movingDrawingId === dwg.id ? null : dwg.id); }}
                         >
@@ -223,38 +224,11 @@ export function ProjectView({ projectId, onBack }) {
                     </div>
                     {/* Move to dropdown */}
                     {movingDrawingId === dwg.id && (
-                      <div
-                        style={{
-                          position: 'absolute', right: 0, top: '100%', zIndex: 50,
-                          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                          borderRadius: '8px', boxShadow: 'var(--shadow-lg)',
-                          minWidth: '180px', overflow: 'hidden',
-                        }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <div style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                          Move to category
-                        </div>
-                        {DISCIPLINES.filter(d => d !== dwg.discipline).map(d => (
-                          <button
-                            key={d}
-                            style={{
-                              display: 'block', width: '100%', textAlign: 'left',
-                              padding: '8px 14px', background: 'none', border: 'none',
-                              color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer',
-                            }}
-                            onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
-                            onMouseLeave={e => e.target.style.background = 'none'}
-                            onClick={() => {
-                              moveDrawingToDiscipline(dwg.id, d);
-                              setMovingDrawingId(null);
-                            }}
-                          >
-                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#a1a1aa', marginRight: 8 }} />
-                            {d}
-                          </button>
-                        ))}
-                      </div>
+                      <MoveMenu
+                        drawing={dwg}
+                        colors={DISCIPLINE_COLORS}
+                        onDone={(kind) => { setMovingDrawingId(null); if (kind === 'project' && activeDrawingId === dwg.id) setActiveDrawingId(null); }}
+                      />
                     )}
                   </div>
                 ))
@@ -281,6 +255,7 @@ export function ProjectView({ projectId, onBack }) {
             drawingId={activeDrawingId} 
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(s => !s)}
+            onMoved={() => { setActiveDrawingId(null); if (isMobile) setShowSidebar(true); }}
           />
         </div>
       )}

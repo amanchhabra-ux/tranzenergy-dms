@@ -1,4 +1,5 @@
 import React, { useContext, useState, useRef, useEffect } from 'react';
+import { MoveMenu } from './MoveMenu';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
 import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
@@ -24,7 +25,7 @@ const DISCIPLINE_COLORS = {
   'Structural':          '#be185d',
 };
 
-export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
+export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved }) {
   const { drawings, projects, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin } = useContext(AppContext);
 
   const drawing = drawings.find(d => d.id === drawingId);
@@ -211,7 +212,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
                 <FileSpreadsheet size={15} />
               </button>
               <input type="file" ref={crsInputRef} accept=".xlsx, .xls" style={{ display: 'none' }} onChange={handleCrsUpload} />
-              <button className={`btn btn-ghost btn-icon ${showMoveMenu ? 'on' : ''}`} title="Move to category" onClick={() => setShowMoveMenu(s => !s)}>
+              <button className={`btn btn-ghost btn-icon ${showMoveMenu ? 'on' : ''}`} title="Move to category or project" onClick={() => setShowMoveMenu(s => !s)}>
                 <FolderInput size={15} />
               </button>
               <button
@@ -228,30 +229,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar }) {
           )}
 
           {showMoveMenu && (
-            <div
-              style={{
-                position: 'absolute', right: 0, top: '100%', zIndex: 50, marginTop: 8,
-                background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                borderRadius: 10, boxShadow: 'var(--shadow-lg)', minWidth: 190, overflow: 'hidden',
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                Move to category
-              </div>
-              {DISCIPLINES.filter(d => d !== drawing.discipline).map(d => (
-                <button
-                  key={d}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-                  onClick={() => { moveDrawingToDiscipline(drawing.id, d); setShowMoveMenu(false); }}
-                >
-                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: DISCIPLINE_COLORS[d] || '#94a3b8', marginRight: 8 }} />
-                  {d}
-                </button>
-              ))}
-            </div>
+            <MoveMenu drawing={drawing} colors={DISCIPLINE_COLORS} onDone={(kind) => { setShowMoveMenu(false); if (kind === 'project') onMoved?.(); }} />
           )}
           {canDo('upload') && (
             <button className="btn btn-primary btn-sm" onClick={() => setShowUploadModal(true)}>
