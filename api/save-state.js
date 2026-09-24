@@ -1,4 +1,6 @@
 import { put, BlobPreconditionFailedError } from '@vercel/blob';
+import { requireUser } from './_lib/auth.js';
+import { forgetMembers } from './_lib/state.js';
 
 const PATH = 'db_state_v5.json';
 
@@ -10,6 +12,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   res.setHeader('Cache-Control', 'no-store');
+  if (!(await requireUser(req, res))) return;
 
   const body = req.body || {};
   // Old versions of the app posted the bare state without a version and would
@@ -32,6 +35,7 @@ export default async function handler(req, res) {
     };
     if (etag) opts.ifMatch = String(etag).replace(/^W\//, '');
     const blob = await put(PATH, JSON.stringify(state), opts);
+    forgetMembers();
     res.setHeader('x-state-etag', blob.etag || '');
     return res.status(200).json({ success: true, etag: blob.etag || null });
   } catch (error) {

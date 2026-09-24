@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@clerk/backend": "^2.33.7",
+    "@clerk/clerk-react": "^5.61.10",
     "@vercel/blob": "^2.6.1",
     "aws4fetch": "^1.0.20",
     "exceljs": "^4.4.0",

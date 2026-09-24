@@ -1,9 +1,13 @@
 import { handleUpload } from '@vercel/blob/client';
+import { requireUser } from './_lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // the upload-completed callback comes from Vercel itself, not a signed-in browser
+  const isCallback = req.body?.type === 'blob.upload-completed';
+  if (!isCallback && !(await requireUser(req, res))) return;
 
   try {
     const jsonResponse = await handleUpload({

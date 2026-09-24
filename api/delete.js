@@ -1,11 +1,13 @@
 import { del } from '@vercel/blob';
 import { r2Configured, cleanKey, deleteObject } from './_lib/r2.js';
+import { requireUser } from './_lib/auth.js';
 
 // POST { url } — deletes a stored file (R2 link or Vercel Blob URL)
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  if (!(await requireUser(req, res))) return;
 
   try {
     const { url } = req.body || {};

@@ -94,7 +94,10 @@ function saveState(data) {
   }
 }
 
-export function AppProvider({ children }) {
+// authMode 'clerk': people sign in with Clerk (Google / Microsoft / email code) and are
+// matched to a workspace user by email. authMode 'legacy': the old email login.
+export function AppProvider({ children, authMode = 'legacy', clerkEmail = '', onSignOut }) {
+  const clerkMode = authMode === 'clerk';
   const saved = loadState();
 
   // Patch existing localStorage so the user name updates for returning users
@@ -113,7 +116,9 @@ export function AppProvider({ children }) {
   }
 
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(saved?.currentUser || null);
+  const [currentUser, setCurrentUser] = useState(clerkMode ? null : (saved?.currentUser || null));
+  const [me, setMe] = useState(null);                 // server's view of the signed-in person (clerk mode)
+  const [accessDenied, setAccessDenied] = useState(null); // { email } when signed in but not a member
   const [users,       setUsers]       = useState(saved?.users ? recolorUsers(saved.users) : SEED_USERS);
   const [projects,    setProjects]    = useState(saved?.projects    || SEED_PROJECTS);
   const [drawings,    setDrawings]    = useState(saved?.drawings    || SEED_DRAWINGS);
@@ -225,7 +230,22 @@ export function AppProvider({ children }) {
 
   // First load
   useEffect(() => {
-    pullFromCloud().finally(() => setLoading(false));
+    (async () => {
+      if (clerkMode) {
+        try {
+          const r = await fetch('/api/me', { cache: 'no-store' });
+          const m = await r.json().catch(() => ({}));
+          if (r.ok && m.authEnabled) {
+            setMe(m);
+            if (!m.isMember && !m.isAdminEmail) { setAccessDenied({ email: m.email }); setLoading(false); return; }
+          } else if (r.status === 401) {
+            onSignOut?.(); return;
+          }
+        } catch { /* fall through; the cloud load will report problems */ }
+      }
+      await pullFromCloud();
+      setLoading(false);
+    })();
   }, [pullFromCloud]);
 
   // Keep up with other people's changes
@@ -274,7 +294,30 @@ export function AppProvider({ children }) {
     const name = currentUser?.name;
     setCurrentUser(null);
     addLog(`${name} signed out.`);
+    if (clerkMode) setTimeout(() => onSignOut?.(), 1800); // let the log entry save first
   };
+
+  // Clerk mode: link the signed-in email to its workspace user (first admin is added automatically)
+  useEffect(() => {
+    if (!clerkMode || loading || accessDenied) return;
+    const email = (me?.email || clerkEmail || '').toLowerCase();
+    if (!email) return;
+    const u = users.find(x => String(x.email || '').trim().toLowerCase() === email);
+    if (u) {
+      if (currentUser?.id !== u.id) { setCurrentUser(u); addLog(`${u.name} signed in.`); }
+      return;
+    }
+    if (me?.isAdminEmail) {
+      const nameGuess = me.name && me.name !== email ? me.name : email.split('@')[0];
+      const nu = { id: uid('u'), name: nameGuess, email, role: 'Admin', avatar: nameGuess.slice(0, 2).toUpperCase(), color: '#ea580c' };
+      setUsers(prev => [...prev, nu]);
+      setCurrentUser(nu);
+      addLog(`${nu.name} added as Admin and signed in.`);
+    } else {
+      setAccessDenied({ email });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, loading, me, clerkEmail, accessDenied]);
 
   // ─── Permissions ───────────────────────────────────────────────────────────
   const canDo = useCallback((action) => {
@@ -722,6 +765,7 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       // State
       currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
+      authMode, accessDenied, onSignOut,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth

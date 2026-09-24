@@ -1,4 +1,5 @@
 import { r2Configured, cleanKey, putObject, appFileUrl } from './_lib/r2.js';
+import { requireUser } from './_lib/auth.js';
 
 // POST { sourceUrl, pathname } → { url }
 // Copies an existing file from Vercel Blob storage into R2 (used by "Move files to R2").
@@ -7,6 +8,7 @@ const BLOB_HOST = /^https:\/\/[a-z0-9]+\.(public|private)\.blob\.vercel-storage\
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (!(await requireUser(req, res))) return;
   if (!r2Configured()) return res.status(501).json({ error: 'r2_not_configured' });
   try {
     const { sourceUrl, pathname } = req.body || {};

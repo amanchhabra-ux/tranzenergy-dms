@@ -1,8 +1,5 @@
-import { list, get } from '@vercel/blob';
-
-const PATH = 'db_state_v5.json';
-// Reads return a weak ETag (W/"…"); conditional writes need the plain form
-const strong = (e) => (e ? String(e).replace(/^W\//, '') : '');
+import { readState } from './_lib/state.js';
+import { requireUser } from './_lib/auth.js';
 
 // Returns the shared workspace state.
 // Response header `x-state-etag` identifies this version; pass it back as
@@ -13,23 +10,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   res.setHeader('Cache-Control', 'no-store');
+  if (!(await requireUser(req, res))) return;
 
   try {
-    const { blobs } = await list({ prefix: PATH });
-    const stateBlob = blobs.find(b => b.pathname === PATH);
-    if (!stateBlob) return res.status(200).json({ notFound: true });
-
-    const known = typeof req.query?.etag === 'string' ? strong(req.query.etag) : undefined;
-    const result = await get(stateBlob.url, { access: 'private', useCache: false, ifNoneMatch: known });
-    if (!result) return res.status(200).json({ notFound: true });
-
-    res.setHeader('x-state-etag', strong(result.blob.etag || stateBlob.etag));
-    if (result.statusCode === 304) return res.status(304).end();
-
-    // get() returns the body as a stream
-    const text = await new Response(result.stream).text();
+    const known = typeof req.query?.etag === 'string' ? req.query.etag.replace(/^W\//, '') : undefined;
+    const r = await readState(known);
+    if (r.notFound) return res.status(200).json({ notFound: true });
+    res.setHeader('x-state-etag', r.etag);
+    if (r.notModified) return res.status(304).end();
     res.setHeader('Content-Type', 'application/json');
-    return res.status(200).send(text);
+    return res.status(200).send(r.text);
   } catch (error) {
     console.error('Error getting state:', error);
     return res.status(500).json({ error: error.message });

@@ -6,9 +6,11 @@ import { Dashboard } from './components/Dashboard';
 import { ProjectView } from './components/ProjectView';
 import { AdminPanel } from './components/AdminPanel';
 import { ProposalsView } from './components/ProposalsView';
+import { AccessDenied } from './components/AccessDenied';
+import { AuthGate, clerkEnabled, Splash } from './auth';
 
 function AppShell() {
-  const { currentUser, canDo, loading, cloudStatus } = useContext(AppContext);
+  const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
 
@@ -44,6 +46,10 @@ function AppShell() {
     );
   }
 
+  if (authMode === 'clerk') {
+    if (accessDenied) return <AccessDenied email={accessDenied.email} onSignOut={onSignOut} />;
+    if (!currentUser) return <Splash text="Opening your workspace…" />;
+  }
   if (!currentUser) return <Login />;
 
   const navigateTo = (view, projectId = null) => {
@@ -87,9 +93,20 @@ function AppShell() {
 }
 
 export default function App() {
+  if (!clerkEnabled) {
+    return (
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    );
+  }
   return (
-    <AppProvider>
-      <AppShell />
-    </AppProvider>
+    <AuthGate>
+      {({ email, signOut }) => (
+        <AppProvider key={email} authMode="clerk" clerkEmail={email} onSignOut={signOut}>
+          <AppShell />
+        </AppProvider>
+      )}
+    </AuthGate>
   );
 }
