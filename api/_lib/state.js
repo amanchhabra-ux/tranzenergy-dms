@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { getText, strongEtag } from './r2.js';
+
+export const localEtag = (text) => `"${crypto.createHash('sha1').update(text).digest('hex')}"`;
 
 // The shared workspace document lives in Cloudflare R2 (moved off Vercel Blob,
 // whose free-plan operation limits the 20-second sync used up).
@@ -10,8 +13,12 @@ export { strongEtag };
 /** Read the workspace document. → { notFound } | { notModified, etag } | { text, etag } */
 export async function readState(knownEtag) {
   if (process.env.LOCAL_DATA_DIR) {
+    // local dev: a file on disk, versioned by its hash
     const f = path.join(process.env.LOCAL_DATA_DIR, 'db_state.json');
-    return fs.existsSync(f) ? { text: fs.readFileSync(f, 'utf8'), etag: null } : { notFound: true };
+    if (!fs.existsSync(f)) return { notFound: true };
+    const text = fs.readFileSync(f, 'utf8');
+    const etag = localEtag(text);
+    return knownEtag && strongEtag(knownEtag) === etag ? { notModified: true, etag } : { text, etag };
   }
   return getText(STATE_KEY, { ifNoneMatch: knownEtag });
 }

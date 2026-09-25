@@ -243,6 +243,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                       <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>#{r.sno}</span>
                       {r.pin !== '' && <span style={{ fontSize: 10, color: 'var(--primary-light)' }}>📍 Pin {r.pin}{r.page ? ` · p.${r.page}` : ''}</span>}
+                      {r.internal && <span className="badge badge-muted" style={{ fontSize: 9, padding: '1px 6px' }} title="Not visible to the consultant until the CRS is submitted">Internal</span>}
                       <span style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1, minWidth: 0 }} className="truncate">
                         {[r.commentBy, r.date, r.kind === 'excel' ? 'from Excel' : r.kind === 'local' ? 'added in CRS' : ''].filter(Boolean).join(' · ')}
                       </span>

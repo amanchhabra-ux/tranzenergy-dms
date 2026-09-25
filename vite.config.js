@@ -34,8 +34,8 @@ function localDevStorage() {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost')
-        // Sign-in endpoints: run the real API handlers against local files
-        if (['/api/auth', '/api/me', '/api/admin-password'].includes(url.pathname)) {
+        // Sign-in and workspace endpoints: run the real API handlers against local files
+        if (['/api/auth', '/api/me', '/api/admin-password', '/api/get-state', '/api/save-state'].includes(url.pathname)) {
           process.env.LOCAL_DATA_DIR = root
           process.env.LOCAL_SESSION_SECRET = process.env.LOCAL_SESSION_SECRET || 'local-dev-only'
           try {

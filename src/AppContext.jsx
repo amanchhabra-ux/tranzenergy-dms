@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
-import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel } from './utils/crs';
+import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, addDays, today, canActOnStage, DEFAULT_TURNAROUND_DAYS, EXTERNAL_ROLE } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
@@ -41,7 +42,7 @@ const mergeUsers = (a = [], b = []) => {
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
 const STATUSES = ['IFA', 'AFC', 'Superseded'];
-const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
+const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer', EXTERNAL_ROLE];
 const SEED_PROPOSALS = [];
 
 const STORAGE_KEY = 'tranzenergy_v5';
@@ -152,7 +153,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const saving = useRef(false);
   const pushAgain = useRef(false);
 
+  const pulling = useRef(null);      // the cloud load in progress (loads never overlap)
+  const allowEmptyPush = useRef(false); // set by Reset Workspace, the one time an empty workspace may be saved
   const applyState = useCallback((s) => {
+    // keep the ref in step right away — code running before the next render must see this state
+    stateRef.current = { ...stateRef.current, ...s, users: s.users?.length ? recolorUsers(s.users) : SEED_USERS, disciplines: withOther(s.disciplines) };
     setUsers(s.users?.length ? recolorUsers(s.users) : SEED_USERS);
     setProjects(s.projects || []);
     setDrawings(s.drawings || []);
@@ -176,6 +181,14 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (saving.current) { pushAgain.current = true; return; }
     const local = stripForCloud(stateRef.current);
     if (baseRef.current && stateEquals(local, baseRef.current)) return; // nothing new
+    // Safety net: never replace a workspace that has projects/drawings with an empty one,
+    // unless an admin just chose Reset Workspace.
+    const size = (x) => (x?.projects?.length || 0) + (x?.drawings?.length || 0);
+    if (baseRef.current && size(baseRef.current) > 0 && size(local) === 0 && !allowEmptyPush.current) {
+      console.error('Refusing to save an empty workspace over existing data');
+      return;
+    }
+    allowEmptyPush.current = false;
     saving.current = true;
     try {
       const res = await fetch('/api/save-state', {
@@ -213,6 +226,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Pull other people's changes (and recover if the first load failed)
   const pullFromCloud = useCallback(async () => {
     if (saving.current) return;
+    if (pulling.current) return pulling.current; // one load at a time
+    let done;
+    pulling.current = new Promise(r => { done = r; });
     try {
       const r = await fetchCloud(cloudReady.current ? etagRef.current : undefined);
       if (r.status === 'same') { setCloudStatus('ok'); return; }
@@ -245,6 +261,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     } catch (err) {
       console.error('Failed to load cloud database:', err);
       setCloudStatus('offline');
+    } finally {
+      pulling.current = null;
+      done();
     }
   }, [fetchCloud, applyState, pushToCloud]);
 
@@ -272,12 +291,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
   // Keep up with other people's changes
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') pullFromCloud(); };
+    const tick = () => { if (document.visibilityState === 'visible' && !needsLogin && !loading) pullFromCloud(); };
     const iv = setInterval(tick, 30000);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(iv); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); };
-  }, [pullFromCloud]);
+  }, [pullFromCloud, needsLogin, loading]);
 
   // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
@@ -352,6 +371,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     // action: 'admin' | 'manage_projects' | 'upload' | 'approve' | 'view'
     if (!currentUser) return false;
     const r = currentUser.role;
+    if (r === EXTERNAL_ROLE) {
+      // outside consultant (e.g. Atlanta): uploads submissions and comments, nothing else
+      return action === 'upload' || action === 'view';
+    }
+    if (action === 'sync') return true; // CRS Excel rewriting: internal users only
     if (r === 'Admin') return true;
     if (action === 'admin') return false;
     if (action === 'manage_projects') return r === 'Project Manager';
@@ -359,6 +383,16 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (action === 'approve') return ['Project Manager','Senior Engineer'].includes(r);
     if (action === 'view') return true;
     return false;
+  }, [currentUser]);
+
+  // New comments made by TranzEnergy before the CRS is issued stay internal
+  // (hidden from the consultant) until the approver submits them.
+  const tagNew = useCallback((d) => {
+    const r = d?.review;
+    const t = {};
+    if (r?.stage) { t.stage = r.stage; t.cycle = r.cycle; }
+    if (r && PRE_ISSUE.has(r.stage) && !isExternal(currentUser)) t.vis = 'internal';
+    return t;
   }, [currentUser]);
 
   // ─── Projects ──────────────────────────────────────────────────────────────
@@ -429,9 +463,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       }],
       pins: []
     };
-    setDrawings(prev => [dwg, ...prev]);
+    const proj = projects.find(p => p.id === dwg.projectId);
+    const started = withNewReview(dwg, proj);
+    setDrawings(prev => [started, ...prev]);
     addLog(`Drawing <strong>${dwg.code}</strong> registered by <strong>${currentUser?.name}</strong>.`);
-    return dwg;
+    return started;
   };
 
   const updateDrawing = (id, updates) => {
@@ -479,6 +515,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         (dwg.versions || []).forEach(v => { if (v.pdfData) deleteBlobUrl(v.pdfData); });
         if (dwg.crsData) deleteBlobUrl(dwg.crsData);
         if (dwg.crsPdf) deleteBlobUrl(dwg.crsPdf);
+        [dwg.review?.issued, ...(dwg.review?.cycles || []).map(c => c.issued)].forEach(i => { if (i?.url) deleteBlobUrl(i.url); });
         addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
       }
       return prev.filter(d => d.id !== id);
@@ -518,7 +555,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Comments added/edited in the CRS panel (not tied to a pin)
   const updateCrsItems = (drawingId, updater) => {
     if (!canDo('upload')) return;
-    setDrawings(prev => prev.map(d => (d.id === drawingId ? bumpCrs({ ...d, crsImported: updater(d.crsImported || []) }, true) : d)));
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const before = new Set((d.crsImported || []).map(c => c.id).filter(Boolean));
+      const items = updater(d.crsImported || []).map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
+      return bumpCrs({ ...d, crsImported: items }, true);
+    }));
   };
 
   // Set a pin's status from the CRS: 'Open' | 'Resolved' | 'Accepted'
@@ -622,7 +664,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const [syncKick, setSyncKick] = useState(0);
   const pendingSync = drawings.filter(crsNeedsSync).map(d => `${d.id}:${d.crsRev}`).join('|');
   useEffect(() => {
-    if (loading || !pendingSync || !canDo('upload') || syncBusy.current) return;
+    if (loading || !pendingSync || !canDo('upload') || !canDo('sync') || syncBusy.current) return;
     const t = setTimeout(async () => {
       const d = drawingsRef.current.find(crsNeedsSync);
       if (!d) return;
@@ -674,17 +716,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         pdfData: pdfDataUrl || null
       };
       logMsg = `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
-      return {
+      const next = {
         ...dwg,
         currentVersion: nextVer,
         pdfData: pdfDataUrl || dwg.pdfData,
         versions: [rev, ...(dwg.versions || [])]
       };
+      // a new revision restarts the review at step 1 (comments carried forward)
+      return withNewReview(next, projects.find(p => p.id === dwg.projectId));
     }));
 
     if (logMsg) addLog(logMsg);
     return nextVer;
-  }, [currentUser, addLog, canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, addLog, canDo, projects]);
 
   // ─── Drawing Status ────────────────────────────────────────────────────────
   const setDrawingStatus = (id, status) => {
@@ -700,13 +745,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     let newPinId = null;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const label = (dwg.pins?.length || 0) + 1;
-      const pin = { id: `pin-${Date.now()}`, x, y, page: page || 1, label, resolved: false, comments: [] };
+      const label = Math.max(0, ...(dwg.pins || []).map(p => Number(p.label) || 0)) + 1;
+      const pin = { id: `pin-${Date.now()}`, x, y, page: page || 1, label, resolved: false, comments: [], authorId: currentUser?.id, ...tagNew(dwg) };
       newPinId = pin.id;
       return { ...dwg, pins: [...(dwg.pins || []), pin] };
     }));
     return newPinId;
-  }, [canDo]);
+  }, [canDo, tagNew, currentUser]);
 
   const addComment = useCallback((drawingId, pinId, text, type = 'internal') => {
     if (!canDo('upload')) return;
@@ -719,15 +764,17 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
           const comment = {
             id: `c-${Date.now()}`,
             author: currentUser?.name || 'Unknown',
+            authorId: currentUser?.id,
             text,
             date: new Date().toISOString().replace('T',' ').substring(0,16),
-            type
+            type,
+            ...tagNew(dwg),
           };
           return { ...pin, comments: [...pin.comments, comment] };
         })
       });
     }));
-  }, [currentUser, canDo]);
+  }, [currentUser, canDo, tagNew]);
 
   const resolvePin = useCallback((drawingId, pinId) => {
     if (!canDo('upload')) return;
@@ -744,6 +791,135 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) });
     }));
   }, [canDo]);
+
+
+  // ─── Review workflow ───────────────────────────────────────────────────────
+  const projectOf = (d) => projects.find(p => p.id === d?.projectId);
+  const histEntry = (action, extra = {}) => ({
+    id: uid('wf'), at: new Date().toISOString(), by: currentUser?.id || null, byName: currentUser?.name || 'System', action, ...extra,
+  });
+
+  // Steps 1–2: a submission is registered → review cycle starts at internal review 1
+  const newReview = (d, project, prev) => {
+    const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
+    const cycle = (prev?.cycle || 0) + 1;
+    const archived = prev ? [...(prev.cycles || []), {
+      cycle: prev.cycle, version: prev.version, category: prev.category || null,
+      stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
+    }] : [];
+    const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
+    return {
+      cycle, version: d.currentVersion || 'R0', stage: 'ir1',
+      startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+      cycles: archived,
+      history: [...(prev?.history || []), histEntry(prev ? 'resubmitted' : 'registered', {
+        to: 'ir1', version: d.currentVersion || 'R0',
+        note: prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`,
+      })],
+    };
+  };
+  const withNewReview = (d, project) => (workflowOn(project) ? { ...d, review: newReview(d, project, d.review) } : d);
+
+  const startReview = (drawingId) => {
+    const d = drawings.find(x => x.id === drawingId);
+    const p = projectOf(d);
+    if (!d || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return;
+    setDrawings(prev => prev.map(x => (x.id === drawingId ? { ...x, review: newReview(x, p, x.review) } : x)));
+    addLog(`Review started for <strong>${d.code}</strong> ${d.currentVersion}.`);
+  };
+
+  const canAct = (d) => canActOnStage(currentUser, projectOf(d), d?.review?.stage);
+
+  // Steps 3, 4, 7: hand over to the next stage
+  const advanceReview = (drawingId, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    const from = d?.review?.stage;
+    const to = NEXT_STAGE[from];
+    if (!d || !to || to === 'consultant' || !canAct(d)) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, stage: to, history: [...(x.review.history || []), histEntry('advanced', { from, to, note })] },
+    })));
+    addLog(`<strong>${d.code}</strong>: ${STAGE[from].label} done → ${STAGE[to].label}.`);
+  };
+
+  // Steps 5–6: the approver submits; the CRS is issued in the contractual template
+  const issueToConsultant = async (drawingId, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    const p = projectOf(d);
+    if (!d || d.review?.stage !== 'approval' || !canAct(d)) throw new Error('Not allowed at this stage.');
+    // publish TranzEnergy's comments, then build the sheet from what will be visible.
+    // Comments read from an earlier Excel become sheet rows of their own in the new template.
+    const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis, ...rest } = o; return rest; };
+    const asLocal = (c) => (c.local ? pub(c) : { ...pub(c), local: true, id: c.id || uid('crs'), row: undefined, sno: undefined });
+    const pins = (d.pins || []).map(pin => ({ ...pub(pin), comments: (pin.comments || []).map(pub) }));
+    const items = (d.crsImported || []).map(asLocal);
+    const published = { ...d, pins, crsImported: items, crsRowMap: {} };
+    const { bytes, layout, rowMap, fileName } = await buildIssuedCrs(published, p);
+    const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    // a frozen copy of what was sent, and a working copy that keeps syncing
+    const issuedUrl = await uploadCrsFile(d.code, new File([bytes], fileName.replace(/\.xlsx$/, '_issued.xlsx'), { type }));
+    const workUrl = await uploadCrsFile(d.code, new File([bytes], fileName, { type }));
+    const issued = { url: issuedUrl, fileName, at: new Date().toISOString(), by: currentUser?.name, version: d.currentVersion };
+    setDrawings(prev => prev.map(x => {
+      if (x.id !== drawingId) return x;
+      const pinIds = new Set(pins.map(q => q.id)), itemIds = new Set(items.map(q => q.id));
+      if (x.crsData && x.crsData !== workUrl) deleteBlobUrl(x.crsData);
+      return {
+        ...x,
+        // anything added while the sheet was being built is kept (and synced next)
+        pins: [...pins.map(q => { const live = (x.pins || []).find(z => z.id === q.id); return live ? { ...pub(live), comments: (live.comments || []).map(pub) } : q; }),
+               ...(x.pins || []).filter(z => !pinIds.has(z.id))],
+        crsImported: [...items, ...(x.crsImported || []).filter(z => z.local && !itemIds.has(z.id))],
+        crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
+        crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
+        review: {
+          ...x.review, stage: 'consultant', issued,
+          history: [...(x.review.history || []), histEntry('issued', { from: 'approval', to: 'consultant', note, crs: issued })],
+        },
+      };
+    }));
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: CRS submitted to ${p?.workflow?.consultantName || 'the consultant'}.`);
+  };
+
+  // Step 8: the client's category (recorded by us — the client doesn't sign in)
+  const recordCategory = (drawingId, category, note = '', decidedOn = today()) => {
+    const d = drawings.find(x => x.id === drawingId);
+    const cat = CATEGORIES.find(c => c.key === category);
+    if (!d || !cat || d.review?.stage !== 'client' || !canAct(d)) return;
+    const to = cat.closes ? 'closed' : 'resubmit';
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: {
+        ...x.review, stage: to, category, decidedOn, closedAt: cat.closes ? today() : null,
+        history: [...(x.review.history || []), histEntry('category', { from: 'client', to, category, note, decidedOn })],
+      },
+    })));
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${cat.label}</strong>.`);
+  };
+  const p0 = (p) => p?.workflow?.clientName || 'Client';
+
+  const setReviewDue = (drawingId, dueDate) => {
+    const d = drawings.find(x => x.id === drawingId);
+    if (!d?.review || !(canDo('manage_projects') || canAct(d))) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, dueDate, history: [...(x.review.history || []), histEntry('due', { note: `Due date set to ${dueDate}` })] },
+    })));
+  };
+
+  // Admin correction: move a review to any stage
+  const setReviewStage = (drawingId, stage, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    if (!d?.review || !canDo('admin') || !STAGE[stage]) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, stage, history: [...(x.review.history || []), histEntry('moved', { from: x.review.stage, to: stage, note: note || 'Stage changed by admin' })] },
+    })));
+    addLog(`<strong>${d.code}</strong>: review moved to ${STAGE[stage].label}.`);
+  };
+
+  const updateWorkflow = (projectId, workflow) => {
+    if (!canDo('manage_projects')) return;
+    setProjects(prev => prev.map(p => (p.id === projectId ? { ...p, workflow: { ...(p.workflow || {}), ...workflow } } : p)));
+    addLog('Review workflow settings updated.');
+  };
 
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
@@ -821,8 +997,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
       canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
       saveNow: pushToCloud,
+      allowEmptySave: () => { allowEmptyPush.current = true; },
       // Comments
       addPin, addComment, resolvePin, acceptPin,
+      // Review workflow
+      startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
       // Users
       createUser, updateUser, deleteUser,
       // Disciplines

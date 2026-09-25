@@ -11,12 +11,16 @@ import { AuthGate, clerkEnabled, Splash } from './auth';
 import { Menu } from 'lucide-react';
 import { PasswordLogin } from './components/PasswordLogin';
 import { ChangePassword } from './components/ChangePassword';
+import { MyReviews, useMyReviewCount } from './components/ReviewTracker';
+import { isExternal } from './utils/workflow';
 
 function AppShell() {
   const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut, needsLogin, mustChangePassword, logout } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
   const [navOpen, setNavOpen] = React.useState(false); // phone: menu drawer
+  const [openDrawingId, setOpenDrawingId] = React.useState(null); // jump to a drawing (from My reviews)
+  const reviewCount = useMyReviewCount();
 
   if (loading) {
     return (
@@ -62,20 +66,24 @@ function AppShell() {
   }
   if (!currentUser) return <Login />;
 
-  const navigateTo = (view, projectId = null) => {
+  const navigateTo = (view, projectId = null, drawingId = null) => {
     setNavOpen(false);
     setActiveView(view);
     if (projectId) setActiveProjectId(projectId);
+    setOpenDrawingId(drawingId);
   };
 
   const renderContent = () => {
     if (activeView === 'project' && activeProjectId) {
-      return <ProjectView projectId={activeProjectId} onBack={() => setActiveView('dashboard')} />;
+      return <ProjectView key={activeProjectId} projectId={activeProjectId} initialDrawingId={openDrawingId} onBack={() => setActiveView('dashboard')} />;
+    }
+    if (activeView === 'myreviews') {
+      return <MyReviews onOpenDrawing={(projectId, drawingId) => navigateTo('project', projectId, drawingId)} />;
     }
     if (activeView === 'admin' && canDo('admin')) {
       return <AdminPanel />;
     }
-    if (activeView === 'backup') {
+    if (activeView === 'backup' && !isExternal(currentUser)) {
       return <AdminPanel initialTab="backup" />;
     }
     if (activeView === 'proposals' && canDo('admin')) {
@@ -91,11 +99,15 @@ function AppShell() {
         activeProjectId={activeProjectId}
         onNavigate={navigateTo}
         mobileOpen={navOpen}
+        reviewCount={reviewCount}
       />
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
       <div className="main-content">
         <div className="mobile-topbar">
-          <button className="btn btn-ghost btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <button className="btn btn-ghost btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu" style={{ position: 'relative' }}>
+            <Menu size={20} />
+            {reviewCount.total > 0 && <span className={`nav-dot ${reviewCount.overdue ? 'overdue' : ''}`}>{reviewCount.total}</span>}
+          </button>
           <div className="mobile-topbar-brand"><img src="/logo-mark.png" alt="" style={{ width: 32, height: 32 }} /> Tranz Energy</div>
         </div>
         {cloudStatus === 'offline' && (

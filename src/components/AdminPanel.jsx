@@ -8,12 +8,13 @@ import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Databas
 const ROLE_COLORS = {
   'Admin': '#3f7d3a', 'Project Manager': '#2a4439',
   'Senior Engineer': '#15803d', 'Engineer': '#d97706', 'Viewer': '#a1a1aa',
+  'Consultant': '#0369a1', // outside consultant (e.g. Atlanta): sees only assigned projects
 };
 
 const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave } = useContext(AppContext);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -129,6 +130,7 @@ export function AdminPanel({ initialTab = 'users' }) {
 
       // 2. clear the workspace
       setImportStatus('Clearing the workspace…');
+      allowEmptySave(); // deliberate: the only time an empty workspace may overwrite the saved one
       importWorkspaceData({
         users: [
           { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#3f7d3a' },
