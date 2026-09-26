@@ -217,7 +217,7 @@ function IssueModal({ drawing, project, onClose }) {
       </>}>
       <ul className="review-checklist">
         <li><strong>{count}</strong> comment{count === 1 ? '' : 's'} go into the CRS{wf.crsTemplate?.fileName ? <> using the contractual template <strong>{wf.crsTemplate.fileName}</strong></> : ' (standard DMS format — no contractual template set for this project)'}.</li>
-        <li>TranzEnergy's internal comments become visible to {shortName(wf.consultantName, 'the consultant')}.</li>
+        <li>Internal comments become visible to {shortName(wf.consultantName, 'the consultant')}.</li>
         <li>Notified: {notify.length ? notify.join(', ') : <em>nobody set up yet — see Workflow settings</em>}.</li>
         <li>{shortName(wf.consultantName, 'The consultant')} then sends it to {shortName(wf.clientName, 'the client')}.</li>
       </ul>

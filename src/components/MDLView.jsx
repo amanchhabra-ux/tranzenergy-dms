@@ -2,6 +2,7 @@ import React, { useContext, useState, useRef } from 'react';
 import { AppContext } from '../AppContext';
 import { FileSpreadsheet, Download, Upload, Flag, Trash2, FileUp, CheckCircle, Clock, AlertCircle, X, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { fileSlug } from '../utils/org';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -16,7 +17,7 @@ const DISCIPLINE_COLORS = {
 };
 
 export function MDLView({ projectId }) {
-  const { drawings, projects, DISCIPLINES, updateDrawing, deleteDrawing, uploadRevision, addLog, canDo } = useContext(AppContext);
+  const { drawings, projects, DISCIPLINES, updateDrawing, deleteDrawing, uploadRevision, addLog, canDo, org } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
   const projectDrawings = drawings.filter(d => d.projectId === projectId);
@@ -194,7 +195,7 @@ export function MDLView({ projectId }) {
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'MDL Template');
-    XLSX.writeFile(wb, 'Tranzenergy_MDL_Template.xlsx');
+    XLSX.writeFile(wb, `${fileSlug(org)}_MDL_Template.xlsx`);
   };
 
   // Context menu actions

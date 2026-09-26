@@ -15,7 +15,7 @@ import { MyReviews, useMyReviewCount } from './components/ReviewTracker';
 import { isExternal } from './utils/workflow';
 
 function AppShell() {
-  const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut, needsLogin, mustChangePassword, logout } = useContext(AppContext);
+  const { currentUser, canDo, loading, cloudStatus, authMode, accessDenied, onSignOut, needsLogin, mustChangePassword, logout, org } = useContext(AppContext);
   const [activeView, setActiveView] = React.useState('dashboard');
   const [activeProjectId, setActiveProjectId] = React.useState(null);
   const [navOpen, setNavOpen] = React.useState(false); // phone: menu drawer
@@ -38,7 +38,7 @@ function AppShell() {
           width: '50px',
           height: '50px',
           border: '4px solid #e3eadf',
-          borderTopColor: '#3f7d3a',
+          borderTopColor: 'var(--primary)',
           borderRadius: '50%',
           animation: 'spin 1s linear infinite',
           marginBottom: '20px'
@@ -48,7 +48,7 @@ function AppShell() {
             to { transform: rotate(360deg); }
           }
         `}</style>
-        <div style={{ fontSize: '18px', fontWeight: 500, letterSpacing: '0.05em' }}>TRANZENERGY DMS</div>
+        <div style={{ fontSize: '18px', fontWeight: 500, letterSpacing: '0.05em' }}>{org.name}</div>
         <div style={{ fontSize: '12px', color: '#71717a', marginTop: '6px' }}>Connecting to cloud database...</div>
       </div>
     );
@@ -108,7 +108,7 @@ function AppShell() {
             <Menu size={20} />
             {reviewCount.total > 0 && <span className={`nav-dot ${reviewCount.overdue ? 'overdue' : ''}`}>{reviewCount.total}</span>}
           </button>
-          <div className="mobile-topbar-brand"><img src="/logo-mark.png" alt="" style={{ width: 32, height: 32 }} /> Tranz Energy</div>
+          <div className="mobile-topbar-brand">{org.logoUrl && <img src={org.logoUrl} alt="" style={{ height: 28, maxWidth: 96, objectFit: 'contain' }} />} {org.shortName || org.name}</div>
         </div>
         {cloudStatus === 'offline' && (
           <div style={{ background: 'var(--error-glow)', color: 'var(--error)', fontSize: 12, padding: '6px 16px', borderBottom: '1px solid rgba(239,68,68,0.3)' }}>

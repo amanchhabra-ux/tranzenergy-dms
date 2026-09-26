@@ -56,6 +56,7 @@ export function externalView(state, user) {
     proposals: [],
     activityLog: (state.activityLog || []).filter(l => loggedBy(l, user)),
     disciplines: state.disciplines || [],
+    org: state.org || {},
   };
 }
 

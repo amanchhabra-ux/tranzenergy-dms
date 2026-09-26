@@ -3,6 +3,7 @@ import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
 import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
+import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 
 export const AppContext = createContext(null);
 
@@ -32,9 +33,9 @@ const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), en
 const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
 const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
 
-// Avatar colours from older palettes → Tranz Energy green palette
+// Avatar colours from older palettes → the current palette
 const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#5a9a44': '#2f6a2f', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b',
-  // charcoal + orange → Tranz Energy green
+  // charcoal + orange → green
   '#ea580c': '#3f7d3a', '#c2410c': '#2f6a2f', '#27272a': '#2a4439', '#18181b': '#1f2d27', '#f97316': '#5a9a44' };
 const recolorUsers = (list) => (list || []).map(u => (OLD_AVATAR[u.color] ? { ...u, color: OLD_AVATAR[u.color] } : u));
 
@@ -87,6 +88,7 @@ function stripForCloud(data) {
     proposals: (data.proposals || []).map(p => ({ ...p, fileData: isStoredFile(p.fileData) ? p.fileData : null })),
     activityLog: data.activityLog || [],
     disciplines: data.disciplines || [],
+    org: data.org || {},
   };
 }
 
@@ -143,6 +145,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
   const [disciplines, setDisciplines] = useState(withOther(saved?.disciplines));
+  const [org,         setOrg]         = useState(saved?.org || {}); // organisation settings (name, logo, colours)
 
   // ─── Shared cloud database ────────────────────────────────────────────────
   // The whole workspace is one JSON document in Vercel Blob. Every browser:
@@ -152,7 +155,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   //  3. checks for other people's changes every 30 s and when the tab regains focus.
   const [cloudStatus, setCloudStatus] = useState('connecting'); // connecting | ok | offline
   const stateRef = useRef(null);
-  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines };
+  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines, org };
   const baseRef = useRef(null);     // last version seen in the cloud (stripped)
   const etagRef = useRef(null);
   const cloudReady = useRef(false);
@@ -170,6 +173,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     setProposals(s.proposals || []);
     setActivityLog(s.activityLog || []);
     setDisciplines(withOther(s.disciplines));
+    setOrg(s.org || {});
   }, []);
 
   // → { status: 'same' } | { status: 'notFound' } | { status: 'ok', state, etag }
@@ -307,10 +311,16 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
     if (loading) return;
-    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines });
+    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines, org });
     const timer = setTimeout(() => pushToCloud(), 1500);
     return () => clearTimeout(timer);
-  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, loading, pushToCloud]);
+  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, org, loading, pushToCloud]);
+
+  // Organisation colours, page title and icon; remembered for the sign-in page
+  useEffect(() => {
+    applyOrgTheme(org);
+    if (!loading) cacheOrg(org);
+  }, [org, loading]);
 
   // Keep the signed-in user in step with the shared user list (role changes, removal)
   useEffect(() => {
@@ -982,6 +992,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     addLog('Review workflow settings updated.');
   };
 
+  // ─── Organisation settings ────────────────────────────────────────────────
+  const updateOrg = (updates) => {
+    if (!canDo('admin')) return;
+    setOrg(prev => ({ ...prev, ...updates }));
+    addLog('Organisation settings updated.');
+  };
+
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
     if (!canDo('admin')) return null;
@@ -1036,6 +1053,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (data.proposals) setProposals(data.proposals);
     if (data.activityLog) setActivityLog(data.activityLog);
     if (data.disciplines) setDisciplines(withOther(data.disciplines));
+    if (data.org) setOrg(data.org);
     addLog('Workspace data imported successfully.', currentUser?.name || 'System');
   };
 
@@ -1043,6 +1061,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     <AppContext.Provider value={{
       // State
       currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
+      org: orgOf(org), orgSettings: org, updateOrg,
       authMode, accessDenied, onSignOut, needsLogin, mustChangePassword,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,

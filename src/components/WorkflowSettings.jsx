@@ -6,11 +6,11 @@ import { uploadCrsFile } from '../utils/uploadFile';
 import { readCrs } from '../utils/crs';
 
 const ROLE_ROWS = [
-  { key: 'consultantUsers', step: 1, label: 'Consultant — uploads & sends to client', hint: 'Uploads the first copy with a note (Atlanta logins); once the CRS is ready, sends it to the client' },
+  { key: 'consultantUsers', step: 1, label: 'Consultant — uploads & sends to client', hint: 'Uploads the first copy with a note (consultant logins); once the CRS is ready, sends it to the client' },
   { key: 'firstReviewers',  step: 2, label: 'TE Engineer 1', hint: 'Reviews and comments first' },
   { key: 'secondReviewers', step: 3, label: 'TE Review Engineer — review & CRS', hint: 'Downloads, reviews, adds comments to the CRS and marks it ready for the consultant' },
   { key: 'approvers',       step: 4, label: 'Final check & submit', hint: 'Only if a separate final check is switched on below', finalOnly: true },
-  { key: 'issueNotify',     step: null, label: 'Also notify when the CRS is ready', hint: 'Told when the CRS goes to the consultant (e.g. Noor)' },
+  { key: 'issueNotify',     step: null, label: 'Also notify when the CRS is ready', hint: 'Told when the CRS goes to the consultant' },
 ];
 
 export function WorkflowSettings({ project, onClose }) {
@@ -91,16 +91,16 @@ export function WorkflowSettings({ project, onClose }) {
           <div className="wf-grid">
             <div className="form-group">
               <label className="form-label">Consultant</label>
-              <input className="form-input" value={wf.consultantName || ''} onChange={e => set('consultantName', e.target.value)} placeholder="Atlanta (AEL)" />
+              <input className="form-input" value={wf.consultantName || ''} onChange={e => set('consultantName', e.target.value)} placeholder="e.g. Consultant Ltd (CON)" />
             </div>
             <div className="form-group">
               <label className="form-label">Client</label>
-              <input className="form-input" value={wf.clientName || ''} onChange={e => set('clientName', e.target.value)} placeholder="RPCL" />
+              <input className="form-input" value={wf.clientName || ''} onChange={e => set('clientName', e.target.value)} placeholder="e.g. Client Ltd" />
             </div>
             <div className="form-group">
               <label className="form-label">Turnaround (calendar days)</label>
               <input type="number" min={1} className="form-input" value={wf.turnaroundDays} onChange={e => set('turnaroundDays', e.target.value)} />
-              <div className="wf-hint">Per Annex 2 cl 9.1 — change when agreed with AEL. Each due date can also be edited.</div>
+              <div className="wf-hint">As agreed in the contract. Each due date can also be edited.</div>
             </div>
           </div>
 

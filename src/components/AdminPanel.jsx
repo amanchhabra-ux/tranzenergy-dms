@@ -1,20 +1,22 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { StorageMigration } from './StorageMigration';
+import { OrgSettings } from './OrgSettings';
+import { fileSlug } from '../utils/org';
 import { isStoredFile } from '../utils/uploadFile';
 import { UserPasswordModal, generatePassword, setUserPassword } from './UserPasswordModal';
-import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound } from 'lucide-react';
+import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound, Building2 } from 'lucide-react';
 
 const ROLE_COLORS = {
   'Admin': '#3f7d3a', 'Project Manager': '#2a4439',
   'Senior Engineer': '#15803d', 'Engineer': '#d97706', 'Viewer': '#a1a1aa',
-  'Consultant': '#0369a1', // outside consultant (e.g. Atlanta): sees only assigned projects
+  'Consultant': '#0369a1', // outside consultant: sees only assigned projects
 };
 
 const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings } = useContext(AppContext);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -61,11 +63,12 @@ export function AdminPanel({ initialTab = 'users' }) {
       drawings,
       proposals,
       activityLog,
-      disciplines: DISCIPLINES
+      disciplines: DISCIPLINES,
+      org: orgSettings,
     }, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     
-    const exportFileDefaultName = `tranzenergy_dms_backup_${new Date().toISOString().split('T')[0]}.json`;
+    const exportFileDefaultName = `${fileSlug(org)}_backup_${new Date().toISOString().split('T')[0]}.json`;
     
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
@@ -159,7 +162,8 @@ export function AdminPanel({ initialTab = 'users' }) {
     ...(currentUser?.role === 'Admin' ? [
       { key: 'users', label: 'Users', icon: Users },
       { key: 'projects', label: 'Projects', icon: Folder },
-      { key: 'activity', label: 'Audit Log', icon: Activity }
+      { key: 'activity', label: 'Audit Log', icon: Activity },
+      { key: 'org', label: 'Organisation', icon: Building2 },
     ] : []),
     { key: 'backup', label: 'Backup & Sync', icon: Database },
   ];
@@ -351,6 +355,9 @@ export function AdminPanel({ initialTab = 'users' }) {
           </div>
         )}
 
+        {/* ── Organisation Tab ───────────────────────────────────────────────── */}
+        {tab === 'org' && currentUser?.role === 'Admin' && <OrgSettings />}
+
         {/* ── Backup & Sync Tab ──────────────────────────────────────────────── */}
         {tab === 'backup' && (
           <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0', width: '100%' }}>
@@ -439,7 +446,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Email *</label>
-                  <input className="form-input" type="email" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} placeholder="name@tranzenergy.in" required />
+                  <input className="form-input" type="email" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} placeholder="name@company.com" required />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Role *</label>
