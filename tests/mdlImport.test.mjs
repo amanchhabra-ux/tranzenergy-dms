@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { readWorkbook, defaultImportSettings, buildPlan, applyPlan, exportWorkbook, workbookBytes } from '../src/utils/mdlImport.js';
 import { TE002_MDL_COLUMNS, normCode, cellValue, mdlColumns, nextRevision } from '../src/utils/mdl.js';
+import { stageName } from '../src/utils/workflow.js';
 
 const TE = 'C:/Users/Jacopo Licheri/Documents/Lavoro/Tranzenergy IN/Offers/TE-002 OE RPCL Madarganj';
 const FILE_A = process.env.MDL_IMPORT_FILE || `${TE}/Review pipeline/DMS MDL import 24.09.2026.xlsx`;
@@ -154,7 +155,7 @@ console.log('Test 5: export, then re-import the export');
   assert.deepEqual(header, visible); ok('same columns, labels and order as the MDL table');
   const exp = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
   const stageCol = header.indexOf('TE review stage');
-  assert.ok(exp.slice(1).some(r => r[stageCol] === 'Expected') && exp.slice(1).some(r => r[stageCol] === 'Internal review 1')); ok('derived columns filled (TE review stage: Expected / Internal review 1)');
+  assert.ok(exp.slice(1).some(r => r[stageCol] === 'Expected') && exp.slice(1).some(r => r[stageCol] === stageName(state.project, 'ir1'))); ok(`derived columns filled (TE review stage: Expected / ${stageName(state.project, 'ir1')})`);
   const { plan } = importInto(state, readWorkbook(workbookBytes(wb)));
   assert.equal(plan.counts.new, 0); assert.equal(plan.counts.updated, 0); assert.equal(plan.counts.skipped, 0);
   ok(`re-import of the export: 0 new, 0 updated (${plan.counts.unchanged} unchanged)`);

@@ -9,7 +9,7 @@
 //                    only while the review has nothing to say.
 // drawing.expected: true while the document is listed in the MDL but no file has arrived
 // (versions: [], currentVersion: null, no review, no due date).
-import { STAGE } from './workflow.js';
+import { stageName } from './workflow.js';
 
 export const COLUMN_TYPES = ['text', 'number', 'date', 'list'];
 
@@ -118,7 +118,7 @@ export function derivedValue(c, d, project) {
   switch (c.derive) {
     case 'revision': return d.currentVersion || '';
     case 'lastUpdated': return day(d.versions?.[0]?.date);
-    case 'stage': return d.expected ? 'Expected' : r ? (STAGE[r.stage]?.label || r.stage || '') : '';
+    case 'stage': return d.expected ? 'Expected' : r ? stageName(project, r.stage) : ''; // same names as the rest of the app
     case 'proposedCategory': return categoryText(r?.proposedCategory, project);
     case 'issuedDate': return day(r?.issued?.at || [...(r?.history || [])].reverse().find(h => h.action === 'issued')?.at);
     case 'forwardedDate': return day([...(r?.history || [])].reverse().find(h => h.to === 'client')?.at);
