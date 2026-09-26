@@ -44,6 +44,13 @@ export function ReviewBar({ drawing }) {
   const r = drawing.review;
   const external = isExternal(currentUser);
 
+  if (!r && drawing.expected) {
+    return (
+      <div className="review-bar review-bar-empty">
+        <span>Listed in the MDL, not received yet. The review starts when the file is uploaded.</span>
+      </div>
+    );
+  }
   if (!r) {
     if (external || !canDo('upload')) return null;
     return (

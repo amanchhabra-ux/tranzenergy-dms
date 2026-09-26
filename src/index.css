@@ -1935,6 +1935,7 @@ body.dms-focus .revision-timeline > .comments-toggle { display: inline-flex !imp
 .stage-chip.s-resubmit { background: #fff7e6; color: #b45309; border-color: #fcd9a0; }
 .stage-chip.s-closed { background: #ecfdf3; color: #15803d; border-color: #bbe5c8; }
 .stage-chip.none { color: var(--text-muted); }
+.stage-chip.s-expected { background: #f8fafc; color: #64748b; border: 1px dashed #cbd5e1; }
 
 /* Reviews tab */
 .tracker { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 14px 18px; gap: 12px; overflow: hidden; }
