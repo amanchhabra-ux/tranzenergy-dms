@@ -23,22 +23,22 @@ export function allowedProjectIds(state, user) {
   return new Set((state.projects || []).filter(p => (p.assignedUsers || []).includes(user.id)).map(p => p.id));
 }
 
-/** A drawing as the consultant sees it: TranzEnergy's unpublished comments removed. */
+/**
+ * A drawing as the consultant sees it: TranzEnergy's unpublished comments removed, and
+ * never the working CRS workbook, at any stage: it can hold internal comments that no
+ * filter reaches inside an .xlsx. Their CRS is rebuilt from this view on the issued copy
+ * (consultantCrs in src/utils/crs.js; the issued file stays in review.issued).
+ */
 function drawingForExternal(d) {
   const out = {
     ...d,
     pins: (d.pins || []).filter(p => !hidden(p)).map(p => ({ ...p, comments: (p.comments || []).filter(c => !hidden(c)) })),
     crsImported: (d.crsImported || []).filter(c => !hidden(c)),
     activity: (d.activity || []).filter(e => !hidden(e)),
+    crsData: null, crsFileName: null, crsLayout: null, crsRowMap: {}, crsClearRows: [],
   };
-  if (d.review && PRE_ISSUE.has(d.review.stage)) {
-    // the working CRS Excel may already hold internal comments — show only what was issued
-    const lastIssued = d.review.issued || (d.review.cycles || []).slice(-1)[0]?.issued || null;
-    out.crsData = lastIssued?.url || null;
-    out.crsFileName = lastIssued?.fileName || null;
-    out.crsLayout = null; out.crsRowMap = {};
-    out.crsImported = out.crsImported.filter(c => c.local);
-  }
+  // before issue, rows read from the working Excel are TranzEnergy's own
+  if (d.review && PRE_ISSUE.has(d.review.stage)) out.crsImported = out.crsImported.filter(c => c.local);
   return out;
 }
 
@@ -211,10 +211,12 @@ function mergeDrawing(sd, inc, user, project, taken, now) {
     if (typeof inc[k] === 'string' && inc[k] !== sd[k]) out[k] = inc[k];
   }
   Object.assign(out, mergeComments(sd, inc, user));
+  // their browser has no working Excel to mark; flag it here so an internal tab rewrites it
+  const commentsChanged = JSON.stringify([sd.pins, sd.crsImported]) !== JSON.stringify([out.pins, out.crsImported]);
   out.review = mergeReview(sd, out, inc, user, project, added.length > 0);
   const activity = mergeActivity(sd, inc, user, now);
   if (activity) out.activity = activity;
-  out.crsRev = Math.max(sd.crsRev || 0, inc.crsRev || 0); // internal users' browsers rewrite the Excel
+  out.crsRev = Math.max(sd.crsRev || 0, inc.crsRev || 0, commentsChanged && sd.crsData ? (sd.crsRev || 0) + 1 : 0); // internal users' browsers rewrite the Excel
   return out;
 }
 

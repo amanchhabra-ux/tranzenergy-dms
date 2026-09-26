@@ -549,6 +549,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Excel's comments into the auto CRS and fills blank drawing fields from it.
   const uploadCRS = (drawingId, crsData, parsed, fileName) => {
     if (!canDo('upload')) return;
+    if (isExternal(currentUser)) { importCrsComments(drawingId, parsed); return; } // never the working file
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
       if (parsed?.fileType === 'pdf') {
@@ -574,6 +575,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
       }, upEv);
     }));
+  };
+
+  // An outside consultant's Excel of comments: each row becomes a comment of theirs in the
+  // CRS, added after ours; nothing of ours is replaced (the server enforces the same).
+  const importCrsComments = (drawingId, parsed) => {
+    if (!canDo('upload') || !currentUser) return 0;
+    const rows = (parsed?.comments || []).filter(c => String(c.comment || '').trim());
+    if (!rows.length) return 0;
+    const date = new Date().toISOString().slice(0, 10);
+    updateCrsItems(drawingId, items => [...items, ...rows.map(c => ({
+      id: uid('crs'), local: true, comment: String(c.comment).trim(), commentBy: currentUser.name,
+      date, page: c.page || '', reply: '', status: 'Open',
+    }))]);
+    return rows.length;
   };
 
   // Comments added/edited in the CRS panel (not tied to a pin)
@@ -903,6 +918,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     const issuedUrl = await uploadCrsFile(d.code, new File([bytes], fileName.replace(/\.xlsx$/, '_issued.xlsx'), { type }));
     const workUrl = await uploadCrsFile(d.code, new File([bytes], fileName, { type }));
     const issued = { url: issuedUrl, fileName, at: new Date().toISOString(), by: currentUser?.name, version: d.currentVersion };
+    // where each row sits in the issued file: the consultant's download adds their own rows to it
+    const issuedMap = { layout, rowMap };
     setDrawings(prev => prev.map(x => {
       if (x.id !== drawingId) return x;
       const pinIds = new Set(pins.map(q => q.id)), itemIds = new Set(items.map(q => q.id));
@@ -917,7 +934,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
         activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
         review: {
-          ...x.review, stage: 'consultant', issued,
+          ...x.review, stage: 'consultant', issued: { ...issued, ...issuedMap },
           history: [...(x.review.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
         },
       };
@@ -1039,7 +1056,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       getDrawingsByProject, createDrawing, updateDrawing, deleteDrawing,
       moveDrawingToDiscipline, moveDrawingToProject,
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
-      canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
+      canDeleteComment, deletePinComment, deletePin, deleteCrsItem, importCrsComments, replaceFileUrls,
       saveNow: pushToCloud,
       allowEmptySave: () => { allowEmptyPush.current = true; },
       // Comments

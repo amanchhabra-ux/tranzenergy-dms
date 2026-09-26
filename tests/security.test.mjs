@@ -436,6 +436,101 @@ await test('Viewer save where only avatar colours differ -> 200', async () => {
   assert.equal((await post(EMAIL.u5, { state: baseState(), etag: null })).statusCode, 200);
 });
 
+// ── Finding 5 (decided): the consultant never receives the working CRS workbook ──
+const crs = await import('../src/utils/crs.js');
+const crsTexts = async (bytes) => crs.parseCrsRows(await crs.loadWorkbookRows(bytes)).comments.map(c => c.comment);
+
+await test('consultant view has no working CRS (crsData) at any stage', async () => {
+  for (const stage of ['ir1', 'consultant', 'client', 'resubmit', 'closed']) {
+    const s = baseState();
+    Object.assign(s.drawings[0], { crsData: PDF('crs/E-001/1_work.xlsx'), crsFileName: 'work.xlsx', crsLayout: { headerIdx: 1 }, crsRowMap: { 'pin:pin1': 13 } });
+    s.drawings[0].review = { ...s.drawings[0].review, stage, issued: { url: PDF('crs/E-001/1_issued.xlsx'), fileName: 'E-001_R0_CRS.xlsx' } };
+    seed(s);
+    const d = viewOf('u7').drawings.find(x => x.id === 'd1');
+    assert.equal(d.crsData, null, stage);
+    assert.equal(d.crsLayout, null, stage);
+    assert.deepEqual(d.crsRowMap, {}, stage);
+    const { filesInView } = await import('../api/_lib/view.js');
+    const files = filesInView(externalView(stored(), USERS.find(u => u.id === 'u7')));
+    assert.ok(!files.has(PDF('crs/E-001/1_work.xlsx')), stage);
+    assert.ok(files.has(PDF('crs/E-001/1_issued.xlsx')), stage);
+  }
+});
+
+// a drawing whose CRS was issued with one published comment, then more comments arrived
+async function issuedDrawing() {
+  const s = baseState();
+  const d = s.drawings[0];
+  d.pins = [{ id: 'pinTE', x: 1, y: 1, page: 1, label: 1, authorId: 'u2',
+    comments: [{ id: 'cTE', author: 'Project Manager', authorId: 'u2', text: 'Issued TE comment on the CT ratio', date: '2026-09-20 10:00' }] }];
+  const built = await crs.buildIssuedCrs(d, s.projects[0]);
+  const url = `data:application/octet-stream;base64,${Buffer.from(built.bytes).toString('base64')}`;
+  d.review = { ...d.review, stage: 'consultant', issued: { url, fileName: built.fileName, layout: built.layout, rowMap: built.rowMap } };
+  return { s, issuedBytes: built.bytes };
+}
+
+await test('consultant download = issued file as is when they have added nothing', async () => {
+  const { s, issuedBytes } = await issuedDrawing();
+  seed(s);
+  const out = await crs.consultantCrs(viewOf('u7').drawings.find(x => x.id === 'd1'), 'u7');
+  assert.deepEqual(Buffer.from(out.bytes), Buffer.from(issuedBytes));
+});
+
+await test('consultant download = issued rows + own rows, no internal rows, not the working file', async () => {
+  const { s } = await issuedDrawing();
+  const d = s.drawings[0];
+  d.crsData = PDF('crs/E-001/1_work.xlsx'); // never read: loading it would fail in this test
+  d.pins.push(
+    { id: 'pinIn', x: 2, y: 2, page: 1, label: 2, authorId: 'u2', vis: 'internal', comments: [{ id: 'cIn', author: 'Project Manager', authorId: 'u2', text: 'Internal note do not send', vis: 'internal' }] },
+    { id: 'pinAt', x: 3, y: 3, page: 1, label: 3, authorId: 'u7', comments: [{ id: 'cAt', author: 'Atlanta Engineer', authorId: 'u7', text: 'Atlanta pin comment' }] },
+  );
+  d.crsImported = [
+    { id: 'lAt', local: true, comment: 'Atlanta row comment', commentBy: 'Atlanta Engineer', authorId: 'u7', status: 'Open' },
+    { id: 'lTE', local: true, comment: 'TE internal row', commentBy: 'Project Manager', authorId: 'u2', vis: 'internal', status: 'Open' },
+  ];
+  seed(s);
+  const out = await crs.consultantCrs(viewOf('u7').drawings.find(x => x.id === 'd1'), 'u7');
+  const texts = (await crsTexts(out.bytes)).join(' | ');
+  assert.ok(texts.includes('Issued TE comment on the CT ratio'), texts);
+  assert.ok(texts.includes('Atlanta pin comment'), texts);
+  assert.ok(texts.includes('Atlanta row comment'), texts);
+  assert.ok(!texts.includes('Internal note') && !texts.includes('TE internal row'), texts);
+  // and from the full (unfiltered) drawing, rows that are not theirs still do not go in
+  const full = await crs.consultantCrs(stored().drawings.find(x => x.id === 'd1'), 'u7');
+  assert.ok(!(await crsTexts(full.bytes)).join(' | ').includes('Internal note'));
+});
+
+await test('consultant bulk import adds N own rows and cannot edit or delete ours', async () => {
+  const s = baseState();
+  s.drawings[0].review.stage = 'consultant';
+  s.drawings[0].crsImported = [{ id: 'lTE', local: true, comment: 'TE row', commentBy: 'Project Manager', authorId: 'u2', status: 'Open' }];
+  seed(s);
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.crsImported[0].comment = 'rewritten by consultant';
+  d.crsImported[0].status = 'Closed';
+  d.crsImported.push(...[1, 2, 3].map(i => ({ id: `imp${i}`, local: true, comment: `Imported ${i}`, commentBy: 'Project Manager', status: 'Open' })));
+  d.deletedIds = ['lTE'];
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const items = stored().drawings[0].crsImported;
+  assert.deepEqual(items.find(c => c.id === 'lTE'), s.drawings[0].crsImported[0]);
+  const mine = items.filter(c => c.id.startsWith('imp'));
+  assert.equal(mine.length, 3);
+  assert.ok(mine.every(c => c.authorId === 'u7' && c.commentBy === 'Atlanta Engineer' && !c.vis));
+});
+
+await test('a consultant comment marks the working Excel for rewrite by an internal tab', async () => {
+  const s = baseState();
+  Object.assign(s.drawings[0], { crsData: PDF('crs/E-001/1_work.xlsx'), crsRev: 4, crsSyncedRev: 4 });
+  seed(s);
+  const v = viewOf('u7');
+  v.drawings[0].crsImported.push({ id: 'new1', local: true, comment: 'one more', status: 'Open' });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const d = stored().drawings[0];
+  assert.equal(d.crsData, PDF('crs/E-001/1_work.xlsx'));
+  assert.ok(d.crsRev > d.crsSyncedRev);
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });
