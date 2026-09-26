@@ -3,7 +3,7 @@ import { AppContext } from '../AppContext';
 import { PlayCircle, AlertTriangle, Inbox, ChevronRight } from 'lucide-react';
 import { TAG, describe } from '../utils/activity';
 import {
-  STAGE, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
+  STAGE, stageName, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
 } from '../utils/workflow';
 
 const FILTERS = [
@@ -15,9 +15,9 @@ const FILTERS = [
   { key: 'all', label: 'All' },
 ];
 
-function StageChip({ review }) {
+function StageChip({ review, project }) {
   if (!review) return <span className="stage-chip none">Not in review</span>;
-  return <span className={`stage-chip s-${review.stage}`}>{stageLabel(review)}</span>;
+  return <span className={`stage-chip s-${review.stage}`}>{stageLabel(review, project)}</span>;
 }
 export { StageChip };
 
@@ -85,7 +85,7 @@ export function ReviewTracker({ project, onOpenDrawing }) {
                 <tr key={d.id} onClick={() => onOpenDrawing(d.id)}>
                   <td><div className="tracker-code">{d.code}</div><div className="tracker-title">{d.title}</div></td>
                   <td>{d.currentVersion}{r?.cycle > 1 ? <div className="tracker-sub">cycle {r.cycle}</div> : null}</td>
-                  <td><StageChip review={r} /></td>
+                  <td><StageChip review={r} project={project} /></td>
                   <td className="tracker-sub">{who.join(', ') || '—'}</td>
                   <td>{due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">—</span>}</td>
                   <td className="tracker-sub">{open ? `${open} open` : '—'}</td>
@@ -153,7 +153,7 @@ export function MyReviews({ onOpenDrawing }) {
                   <div className="tracker-code">{p.code} · {d.code} · {d.currentVersion}</div>
                   <div className="tracker-title">{d.title}</div>
                 </div>
-                <span className={`stage-chip s-${r.stage}`}>{STAGE[r.stage]?.action}</span>
+                <span className={`stage-chip s-${r.stage}`}>{stageName(p, r.stage)}</span>
                 {due.kind !== 'none' && <span className={`review-due ${due.kind}`}>{due.text}</span>}
                 <ChevronRight size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
               </button>

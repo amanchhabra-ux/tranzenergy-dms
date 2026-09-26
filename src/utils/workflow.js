@@ -8,12 +8,16 @@
 // 7 Atlanta adds its comments, forwards to RPCL         → stage 'client'
 // 8 RPCL issues the review category                      → Cat 1/2: 'closed' · Cat 3/4B: 'resubmit'
 //   A new revision after Cat 3/4B restarts at step 1 with the comments carried forward.
+//
+// RPCL arrangement (26.09.2026) — no separate final check:
+//   Atlanta uploads (with a note) → Kiran reviews → Jacopo downloads, reviews, adds CRS comments
+//   and marks it ready → CRS issued to Atlanta → Atlanta sends it to RPCL → RPCL category.
 
 export const STAGES = [
-  { key: 'ir1',        step: 3, label: 'Internal review 1', short: 'IR-1',     who: 'firstReviewers',  action: 'Mark internal review 1 done' },
-  { key: 'ir2',        step: 4, label: 'Internal review 2', short: 'IR-2',     who: 'secondReviewers', action: 'Mark internal review 2 done' },
+  { key: 'ir1',        step: 3, label: 'Review 1',           short: 'Review 1', who: 'firstReviewers',  action: 'Mark my review done' },
+  { key: 'ir2',        step: 4, label: 'Review 2',           short: 'Review 2', who: 'secondReviewers', action: 'Mark review 2 done' },
   { key: 'approval',   step: 5, label: 'Final check',        short: 'Check',    who: 'approvers',       action: 'Submit to consultant' },
-  { key: 'consultant', step: 7, label: 'With consultant',    short: 'Consultant', who: 'consultantUsers', action: 'Forward to client' },
+  { key: 'consultant', step: 7, label: 'With consultant',    short: 'Consultant', who: 'consultantUsers', action: 'Send to client' },
   { key: 'client',     step: 8, label: 'With client',        short: 'Client',   who: 'recorders',       action: 'Record client category' },
   { key: 'resubmit',   step: 1, label: 'Awaiting resubmission', short: 'Resubmit', who: 'consultantUsers', action: 'Upload the new revision' },
   { key: 'closed',     step: 9, label: 'Closed',             short: 'Closed',   who: null,              action: null },
@@ -37,6 +41,22 @@ export const isExternal = (user) => user?.role === EXTERNAL_ROLE;
 
 export const workflowOn = (project) => !!project?.workflow?.enabled;
 
+// Is there a separate final check (step 5) before the CRS goes out? Off for RPCL: the second
+// reviewer's "ready" issues the CRS to the consultant directly.
+export const finalCheckOn = (wf) => wf?.finalCheck === true;
+/** The stage whose completion issues the CRS to the consultant. */
+export const issuingStage = (wf) => (finalCheckOn(wf) ? 'approval' : 'ir2');
+export const shortOrg = (s, fallback) => (s || fallback).replace(/\s*\(.*\)\s*$/, '');
+
+/** A stage's name for this project ("With Atlanta", "Review & CRS"…). */
+export function stageName(project, key) {
+  const wf = project?.workflow || {};
+  if (key === 'ir2' && !finalCheckOn(wf)) return 'Review & CRS';
+  if (key === 'consultant') return `With ${shortOrg(wf.consultantName, 'consultant')}`;
+  if (key === 'client') return `With ${shortOrg(wf.clientName, 'client')}`;
+  return STAGE[key]?.label || key;
+}
+
 export const today = () => new Date().toISOString().slice(0, 10);
 export function addDays(dateStr, days) {
   const d = new Date(`${(dateStr || today()).slice(0, 10)}T00:00:00Z`);
@@ -52,6 +72,7 @@ export const defaultWorkflow = () => ({
   consultantName: 'Atlanta (AEL)',
   clientName: 'RPCL',
   firstReviewers: [], secondReviewers: [], approvers: [], consultantUsers: [], issueNotify: [],
+  finalCheck: false, // second reviewer's "ready" sends the CRS to the consultant
   crsTemplate: null,
 });
 
@@ -83,11 +104,11 @@ export function dueState(review) {
   return { kind: 'ok', text: `Due ${review.dueDate}`, left };
 }
 
-export function stageLabel(review) {
+export function stageLabel(review, project) {
   if (!review) return 'Not in review';
   if (review.stage === 'closed') return review.category ? `Closed · Cat ${review.category}` : 'Closed';
   if (review.stage === 'resubmit') return `Cat ${review.category} · awaiting resubmission`;
-  return STAGE[review.stage]?.label || review.stage;
+  return project ? stageName(project, review.stage) : (STAGE[review.stage]?.label || review.stage);
 }
 
 /** Step number (1–8) the diagram shows as current. */

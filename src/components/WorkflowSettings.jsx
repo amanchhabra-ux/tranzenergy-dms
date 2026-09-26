@@ -6,11 +6,11 @@ import { uploadCrsFile } from '../utils/uploadFile';
 import { readCrs } from '../utils/crs';
 
 const ROLE_ROWS = [
-  { key: 'firstReviewers',  step: 3, label: 'First reviewer (India)', hint: 'Reviews and comments first, marks internal review 1 done' },
-  { key: 'secondReviewers', step: 4, label: 'TranzEnergy reviewer',   hint: 'Adds comments after the first reviewer, marks internal review 2 done' },
-  { key: 'approvers',       step: 5, label: 'Final check & submit',    hint: 'Checks the merged comment sheet and submits it (e.g. Aman)' },
-  { key: 'issueNotify',     step: 6, label: 'Also notify on submission', hint: 'Told when the CRS is sent to the consultant (e.g. Noor)' },
-  { key: 'consultantUsers', step: 7, label: 'Consultant users',        hint: 'Upload submissions (step 1), add their comments and forward to the client (Atlanta logins)' },
+  { key: 'consultantUsers', step: 1, label: 'Consultant — uploads & sends to client', hint: 'Uploads the first copy with a note (Atlanta logins); once the CRS is ready, sends it to the client' },
+  { key: 'firstReviewers',  step: 2, label: 'Reviewer 1', hint: 'Reviews and comments first (e.g. Kiran, TranzEnergy engineer)' },
+  { key: 'secondReviewers', step: 3, label: 'Reviewer 2 — review & CRS', hint: 'Downloads, reviews, adds comments to the CRS and marks it ready for the consultant (e.g. Jacopo)' },
+  { key: 'approvers',       step: 4, label: 'Final check & submit', hint: 'Only if a separate final check is switched on below', finalOnly: true },
+  { key: 'issueNotify',     step: null, label: 'Also notify when the CRS is ready', hint: 'Told when the CRS goes to the consultant (e.g. Noor)' },
 ];
 
 export function WorkflowSettings({ project, onClose }) {
@@ -51,7 +51,7 @@ export function WorkflowSettings({ project, onClose }) {
   const templateBlock = (
           <div className="wf-role">
             <div className="wf-role-head">
-              <span className="wf-step">6</span>
+              <span className="wf-step" style={{ fontSize: 9 }}>CRS</span>
               <div><strong>Contractual CRS template</strong><div className="wf-hint">The Excel format the CRS is sent in. The DMS fills its title block and comments table.</div></div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -104,13 +104,19 @@ export function WorkflowSettings({ project, onClose }) {
             </div>
           </div>
 
-          {ROLE_ROWS.map(row => {
+          <label className="wf-switch" style={{ background: '#fff', borderColor: 'var(--border)' }}>
+            <input type="checkbox" checked={wf.finalCheck === true} onChange={e => set('finalCheck', e.target.checked)} />
+            <span><strong>Separate final check before the CRS goes out</strong><br />
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Off: reviewer 2's "Done — ready" sends the CRS to the consultant. On: it goes to the final-check person first.</span></span>
+          </label>
+
+          {ROLE_ROWS.filter(row => !row.finalOnly || wf.finalCheck === true).map(row => {
             const list = pool(row.key);
             return (
               <React.Fragment key={row.key}>
               <div className="wf-role">
                 <div className="wf-role-head">
-                  <span className="wf-step">{row.step}</span>
+                  <span className="wf-step" style={row.step ? undefined : { background: 'var(--text-muted)' }}>{row.step || '·'}</span>
                   <div><strong>{row.label}</strong><div className="wf-hint">{row.hint}</div></div>
                 </div>
                 <div className="wf-people">

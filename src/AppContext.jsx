@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, addDays, today, canActOnStage, DEFAULT_TURNAROUND_DAYS, EXTERNAL_ROLE } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, addDays, today, canActOnStage, DEFAULT_TURNAROUND_DAYS, EXTERNAL_ROLE, issuingStage, stageName } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
@@ -485,7 +485,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       pins: []
     };
     const proj = projects.find(p => p.id === dwg.projectId);
-    const started = withNewReview(withActivity(dwg, ev('upload', { what: 'drawing', version: startVer })), proj);
+    const started = withNewReview(withActivity(dwg, ev('upload', { what: 'drawing', version: startVer, ...(data.submissionNote ? { note: snippet(data.submissionNote) } : {}) })), proj, data.submissionNote);
     setDrawings(prev => [started, ...prev]);
     addLog(`Drawing <strong>${dwg.code}</strong> registered by <strong>${currentUser?.name}</strong>.`);
     return started;
@@ -763,7 +763,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         versions: [rev, ...(dwg.versions || [])]
       };
       // a new revision restarts the review at step 1 (comments carried forward)
-      return withNewReview(withActivity(next, ev('upload', { what: 'revision', version: nextVer, note: snippet(changeSummary) })), projects.find(p => p.id === dwg.projectId));
+      return withNewReview(withActivity(next, ev('upload', { what: 'revision', version: nextVer, note: snippet(changeSummary) })), projects.find(p => p.id === dwg.projectId), changeSummary);
     }));
 
     if (logMsg) addLog(logMsg);
@@ -851,7 +851,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   });
 
   // Steps 1–2: a submission is registered → review cycle starts at internal review 1
-  const newReview = (d, project, prev) => {
+  const newReview = (d, project, prev, note = '') => {
     const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
     const cycle = (prev?.cycle || 0) + 1;
     const archived = prev ? [...(prev.cycles || []), {
@@ -859,17 +859,21 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
     }] : [];
     const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
+    const subNote = String(note || '').trim();
     return {
       cycle, version: d.currentVersion || 'R0', stage: 'ir1',
       startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+      // the uploader's note for the reviewers (step 1)
+      note: subNote ? { text: subNote, by: currentUser?.name || 'Someone', at: new Date().toISOString() } : null,
       cycles: archived,
       history: [...(prev?.history || []), histEntry(prev ? 'resubmitted' : 'registered', {
         to: 'ir1', version: d.currentVersion || 'R0',
-        note: prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`,
+        note: (prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`)
+          + (subNote ? `\nNote: ${subNote}` : ''),
       })],
     };
   };
-  const withNewReview = (d, project) => (workflowOn(project) ? { ...d, review: newReview(d, project, d.review) } : d);
+  const withNewReview = (d, project, note) => (workflowOn(project) ? { ...d, review: newReview(d, project, d.review, note) } : d);
 
   const startReview = (drawingId) => {
     const d = drawings.find(x => x.id === drawingId);
@@ -886,18 +890,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     const d = drawings.find(x => x.id === drawingId);
     const from = d?.review?.stage;
     const to = NEXT_STAGE[from];
-    if (!d || !to || to === 'consultant' || !canAct(d)) return;
+    // the stage that issues the CRS goes through issueToConsultant (builds the sheet)
+    if (!d || !to || from === issuingStage(projectOf(d)?.workflow) || !canAct(d)) return;
     setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
       ...x, review: { ...x.review, stage: to, history: [...(x.review.history || []), histEntry('advanced', { from, to, note })] },
     })));
-    addLog(`<strong>${d.code}</strong>: ${STAGE[from].label} done → ${STAGE[to].label}.`);
+    addLog(`<strong>${d.code}</strong>: ${stageName(projectOf(d), from)} done → ${stageName(projectOf(d), to)}.`);
   };
 
   // Steps 5–6: the approver submits; the CRS is issued in the contractual template
   const issueToConsultant = async (drawingId, note = '') => {
     const d = drawings.find(x => x.id === drawingId);
     const p = projectOf(d);
-    if (!d || d.review?.stage !== 'approval' || !canAct(d)) throw new Error('Not allowed at this stage.');
+    const from = d?.review?.stage;
+    if (!d || from !== issuingStage(p?.workflow) || !canAct(d)) throw new Error('Not allowed at this stage.');
     // publish TranzEnergy's comments, then build the sheet from what will be visible.
     // Comments read from an earlier Excel become sheet rows of their own in the new template.
     const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis, ...rest } = o; return rest; };
@@ -926,7 +932,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
         review: {
           ...x.review, stage: 'consultant', issued,
-          history: [...(x.review.history || []), histEntry('issued', { from: 'approval', to: 'consultant', note, crs: issued })],
+          history: [...(x.review.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
         },
       };
     }));

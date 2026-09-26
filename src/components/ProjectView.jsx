@@ -222,7 +222,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
                       <div className="drawing-item-meta">
                         <span className="rev-badge">{dwg.currentVersion}</span>
                         {workflowOn(project) && dwg.review && dwg.review.stage !== 'closed' && (
-                          <StageChip review={dwg.review} />
+                          <StageChip review={dwg.review} project={project} />
                         )}
                         {workflowOn(project) && dueState(dwg.review).kind === 'overdue' && <span className="review-due overdue" style={{ padding: '0 5px' }}>!</span>}
                         {activeTab === 'all' && (
@@ -369,6 +369,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
     setCrsMsg(`CRS read: ${parsed.comments.length} comment${parsed.comments.length === 1 ? '' : 's'}${filled.length ? ` · filled ${filled.join(', ')}` : ''}`);
   };
   const [code, setCode] = useState('');
+  const [subNote, setSubNote] = useState('');
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [discipline, setDiscipline] = useState('Electrical');
@@ -618,7 +619,8 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
       clientName,
       consultant,
       contractor,
-      changeSummary: 'Initial issue R0.'
+      changeSummary: 'Initial issue R0.',
+      submissionNote: subNote.trim(),
     });
     if (dwg && crsFile) {
       try { uploadCRS(dwg.id, await uploadCrsFile(dwg.code, crsFile), crsParsed || await readCrs(crsFile), crsFile.name); }
@@ -727,6 +729,12 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
               <label className="form-label">Description</label>
               <textarea className="form-input" rows={2} placeholder="Brief description of drawing scope…" value={desc} onChange={e => setDesc(e.target.value)} />
             </div>
+            {workflowOn(project) && (
+              <div className="form-group mt-2" style={{ marginBottom: 0 }}>
+                <label className="form-label">Note for the reviewers</label>
+                <textarea className="form-input" rows={2} placeholder="e.g. First submission — please check the earthing and CT details" value={subNote} onChange={e => setSubNote(e.target.value)} />
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">

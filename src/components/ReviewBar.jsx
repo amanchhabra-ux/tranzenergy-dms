@@ -4,27 +4,34 @@ import { AppContext } from '../AppContext';
 import { X, Clock, History, Send, CheckCircle2, Flag, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import {
   STAGE, CATEGORIES, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
-  dueState, currentStep, today, openCommentCount,
+  dueState, today, openCommentCount, finalCheckOn, issuingStage, stageName,
 } from '../utils/workflow';
 
 const shortName = (s, fallback) => (s || fallback).replace(/\s*\(.*\)\s*$/, '');
 // stored R2 files download (rather than open) with ?download=1
 export const dlHref = (url) => (String(url || '').startsWith('/api/file?') ? `${url}&download=1` : url);
 
-/** The eight steps of the review, as in the workflow diagram. */
-function stepList(wf) {
+/**
+ * The steps shown on the strip, named after the people doing them.
+ * Each step lists the review stages during which it is the current one.
+ */
+function stepList(project, users) {
+  const wf = project.workflow || {};
   const cons = shortName(wf.consultantName, 'Consultant');
   const client = shortName(wf.clientName, 'Client');
-  return [
-    { n: 1, label: `${cons} upload` },
-    { n: 2, label: 'Registered' },
-    { n: 3, label: 'Review 1' },
-    { n: 4, label: 'Review 2' },
-    { n: 5, label: 'Final check' },
-    { n: 6, label: 'CRS issued' },
-    { n: 7, label: cons },
-    { n: 8, label: client },
+  const who = (key) => {
+    const names = (wf[key] || []).map(id => users.find(u => u.id === id)?.name?.split(' ')[0]).filter(Boolean);
+    return names.length ? names.slice(0, 2).join('/') + (names.length > 2 ? '+' : '') : '';
+  };
+  const steps = [
+    { key: 'upload', label: `${cons} upload`, stages: ['resubmit'] },
+    { key: 'ir1', label: who('firstReviewers') ? `${who('firstReviewers')} review` : 'Review 1', stages: ['ir1'] },
+    { key: 'ir2', label: who('secondReviewers') ? `${who('secondReviewers')} review${finalCheckOn(wf) ? '' : ' + CRS'}` : (finalCheckOn(wf) ? 'Review 2' : 'Review & CRS'), stages: ['ir2'] },
+    ...(finalCheckOn(wf) ? [{ key: 'approval', label: who('approvers') ? `${who('approvers')} check` : 'Final check', stages: ['approval'] }] : []),
+    { key: 'consultant', label: `${cons} → ${client}`, stages: ['consultant'] },
+    { key: 'client', label: `${client} category`, stages: ['client'] },
   ];
+  return steps.map((st, i) => ({ ...st, n: i + 1 }));
 }
 
 export function ReviewBar({ drawing }) {
@@ -49,7 +56,8 @@ export function ReviewBar({ drawing }) {
     );
   }
 
-  const step = currentStep(r);
+  const steps = stepList(project, users);
+  const step = r.stage === 'closed' ? steps.length + 1 : (steps.find(st => st.stages.includes(r.stage))?.n ?? 0);
   const done = r.stage === 'closed';
   const due = dueState(r);
   const actors = stageActors(project, r.stage).map(id => users.find(u => u.id === id)?.name).filter(Boolean);
@@ -61,16 +69,17 @@ export function ReviewBar({ drawing }) {
 
   let action = null;
   if (mine && !done) {
-    if (r.stage === 'ir1' || r.stage === 'ir2') action = { label: stageInfo.action, kind: 'advance', icon: CheckCircle2 };
-    else if (r.stage === 'consultant') action = { label: `Forward to ${shortName(wf.clientName, 'client')}`, kind: 'advance', icon: Send };
-    else if (r.stage === 'approval') action = { label: `Submit to ${shortName(wf.consultantName, 'consultant')}`, kind: 'issue', icon: Send };
+    const cons = shortName(wf.consultantName, 'consultant');
+    if (r.stage === issuingStage(wf)) action = { label: finalCheckOn(wf) ? `Submit to ${cons}` : `Done — ready for ${cons}`, kind: 'issue', icon: Send };
+    else if (r.stage === 'ir1' || r.stage === 'ir2') action = { label: stageInfo.action, kind: 'advance', icon: CheckCircle2 };
+    else if (r.stage === 'consultant') action = { label: `Send to ${shortName(wf.clientName, 'client')}`, kind: 'advance', icon: Send };
     else if (r.stage === 'client') action = { label: `Record ${shortName(wf.clientName, 'client')} category`, kind: 'category', icon: Flag };
   }
 
   return (
     <div className="review-bar">
       <div className="review-steps" title={`Review cycle ${r.cycle} · ${r.version}`}>
-        {stepList(wf).map(s => {
+        {steps.map(s => {
           const state = done || s.n < step ? 'done' : s.n === step ? 'current' : 'todo';
           return (
             <div key={s.n} className={`review-step ${state} ${r.stage === 'resubmit' && s.n === 1 ? 'warn' : ''}`}>
@@ -87,7 +96,7 @@ export function ReviewBar({ drawing }) {
         {r.stage === 'resubmit' && cat && <span className="badge badge-warning">{cat.label} · awaiting resubmission</span>}
         {!done && r.stage !== 'resubmit' && (
           <span className="review-waiting" title={actors.join(', ')}>
-            {stageInfo?.label}{actors.length ? ` · ${actors.length > 2 ? `${actors.slice(0, 2).join(', ')} +${actors.length - 2}` : actors.join(', ')}` : ''}
+            {stageName(project, r.stage)}{actors.length ? ` · ${actors.length > 2 ? `${actors.slice(0, 2).join(', ')} +${actors.length - 2}` : actors.join(', ')}` : ''}
           </span>
         )}
         {due.kind !== 'none' && (
@@ -107,6 +116,12 @@ export function ReviewBar({ drawing }) {
           </button>
         )}
       </div>
+
+      {r.note?.text && (
+        <div className="review-note" title={`${r.note.by} · ${String(r.note.at).slice(0, 16).replace('T', ' ')}`}>
+          <span className="review-note-label">Note from {r.note.by}</span> {r.note.text}
+        </div>
+      )}
 
       {modal === 'advance' && <AdvanceModal drawing={drawing} project={project} onClose={() => setModal(null)} />}
       {modal === 'issue' && <IssueModal drawing={drawing} project={project} onClose={() => setModal(null)} />}
@@ -155,22 +170,23 @@ function AdvanceModal({ drawing, project, onClose }) {
   const next = stageActors(project, to).map(id => users.find(u => u.id === id)?.name).filter(Boolean);
   const cons = shortName(project.workflow.consultantName, 'the consultant');
   const client = shortName(project.workflow.clientName, 'the client');
+  const nextName = next[0]?.split(' ')[0] || 'the next reviewer';
   const text = {
-    ir1: 'Your comments go to the second reviewer. They stay internal until the CRS is submitted.',
+    ir1: `Your comments go to ${nextName}${finalCheckOn(project.workflow) ? '' : `, who reviews, adds the CRS comments and makes it ready for ${cons}`}. They stay internal until the CRS goes to ${cons}.`,
     ir2: 'The merged comments go to the final check before submission.',
-    consultant: `Marks the CRS as forwarded to ${client}. The review then waits for ${client}'s category.`,
+    consultant: `Records that ${cons} has sent the CRS to ${client}. The review then waits for ${client}'s category.`,
   }[r.stage];
   return (
-    <Modal title={r.stage === 'consultant' ? `Forward to ${client}` : STAGE[r.stage].action} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
+    <Modal title={r.stage === 'consultant' ? `Send to ${client}` : STAGE[r.stage].action} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={() => { advanceReview(drawing.id, note.trim()); onClose(); }}>
-          <CheckCircle2 size={14} /> {r.stage === 'consultant' ? `Forward to ${client}` : 'Done — hand over'}
+          <CheckCircle2 size={14} /> {r.stage === 'consultant' ? `Sent to ${client}` : `Done — hand over to ${nextName}`}
         </button>
       </>}>
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 0 }}>{text}</p>
       {r.stage !== 'consultant' && (
-        <p style={{ fontSize: 13, marginTop: 0 }}>Next: <strong>{STAGE[to].label}</strong>{next.length ? ` — ${next.join(', ')}` : ''}</p>
+        <p style={{ fontSize: 13, marginTop: 0 }}>Next: <strong>{stageName(project, to)}</strong>{next.length ? ` — ${next.join(', ')}` : ''}</p>
       )}
       {r.stage === 'consultant' && <p style={{ fontSize: 13, marginTop: 0 }}>Add {cons}'s own comments on the drawing or in the CRS first, if any.</p>}
       <NoteField value={note} onChange={setNote} placeholder="Anything the next person should know" />
@@ -192,17 +208,18 @@ function IssueModal({ drawing, project, onClose }) {
     catch (e) { console.error(e); setErr(e.message || 'Could not build the CRS'); setBusy(false); }
   };
   return (
-    <Modal title={`Submit to ${shortName(wf.consultantName, 'consultant')}`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={busy ? () => {} : onClose}
+    <Modal title={finalCheckOn(wf) ? `Submit to ${shortName(wf.consultantName, 'consultant')}` : `Review done — ready for ${shortName(wf.consultantName, 'consultant')}`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={busy ? () => {} : onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
         <button className="btn btn-primary" onClick={go} disabled={busy}>
-          {busy ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Building the CRS…</> : <><Send size={14} /> Submit</>}
+          {busy ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Building the CRS…</> : <><Send size={14} /> {finalCheckOn(wf) ? 'Submit' : `Send CRS to ${shortName(wf.consultantName, 'consultant')}`}</>}
         </button>
       </>}>
       <ul className="review-checklist">
         <li><strong>{count}</strong> comment{count === 1 ? '' : 's'} go into the CRS{wf.crsTemplate?.fileName ? <> using the contractual template <strong>{wf.crsTemplate.fileName}</strong></> : ' (standard DMS format — no contractual template set for this project)'}.</li>
         <li>TranzEnergy's internal comments become visible to {shortName(wf.consultantName, 'the consultant')}.</li>
         <li>Notified: {notify.length ? notify.join(', ') : <em>nobody set up yet — see Workflow settings</em>}.</li>
+        <li>{shortName(wf.consultantName, 'The consultant')} then sends it to {shortName(wf.clientName, 'the client')}.</li>
       </ul>
       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Check the merged comments in the CRS view first. A copy of the sheet as sent is kept with the review history.</p>
       <NoteField value={note} onChange={setNote} placeholder="Covering note for the consultant" />

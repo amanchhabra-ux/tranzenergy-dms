@@ -757,7 +757,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
 
           {/* Form */}
           <div className="form-group">
-            <label className="form-label">Change Summary / Revision Note *</label>
+            <label className="form-label">Change summary / note for the reviewers *</label>
             <textarea
               className="form-input"
               value={summary}
