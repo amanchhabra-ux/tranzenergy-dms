@@ -77,6 +77,36 @@ export const defaultWorkflow = () => ({
 });
 
 /**
+ * The review a submission starts with (steps 1-2): internal review 1, due in the
+ * project's turnaround days. prev = the drawing's current review when this is a new
+ * revision (its cycle is archived, its history kept). entry(action, extra) writes the
+ * history entry and `by` names the uploader of `note`, so the browser (AppContext) and
+ * the server (api/_lib/view.js) each stamp their own author.
+ */
+export function newReviewFor(d, project, prev, { entry, note = '', by = '' } = {}) {
+  const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
+  const cycle = (prev?.cycle || 0) + 1;
+  const archived = prev ? [...(prev.cycles || []), {
+    cycle: prev.cycle, version: prev.version, category: prev.category || null,
+    stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
+  }] : [];
+  const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
+  const subNote = String(note || '').trim();
+  return {
+    cycle, version: d.currentVersion || 'R0', stage: 'ir1',
+    startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+    // the uploader's note for the reviewers (step 1)
+    note: subNote ? { text: subNote, by: by || 'Someone', at: new Date().toISOString() } : null,
+    cycles: archived,
+    history: [...(prev?.history || []), entry(prev ? 'resubmitted' : 'registered', {
+      to: 'ir1', version: d.currentVersion || 'R0',
+      note: (prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`)
+        + (subNote ? `\nNote: ${subNote}` : ''),
+    })],
+  };
+}
+
+/**
  * People who act at a stage (user ids). 'recorders' (step 8 — the client doesn't sign in,
  * TranzEnergy records its category) = approvers + second reviewers. Admins can always act.
  */
