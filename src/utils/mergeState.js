@@ -30,10 +30,14 @@ function mergeById(base = [], local = [], remote = [], deep) {
   return order.filter(id => out.has(id) && !seen.has(id) && seen.add(id)).map(id => out.get(id));
 }
 
+// The server stamps the time of each new log and activity entry, so for an entry both
+// sides hold, the stored copy wins. The caps match the server's (api/_lib/view.js).
+// The real fix is to move the log out of this document into append-only storage, a later step.
+const CAP = 5000;
 function mergeLog(local = [], remote = []) {
   const m = new Map();
-  [...remote, ...local].forEach(l => m.set(l.id, l));
-  return [...m.values()].sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, 200);
+  [...local, ...remote].forEach(l => m.set(l.id, l));
+  return [...m.values()].sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, CAP);
 }
 
 function mergeList(base = [], local = [], remote = []) {
@@ -65,8 +69,8 @@ function mergeDrawing(b, l, r) {
   // activity trail: everyone's entries, in time order
   if (!same(b.activity, l.activity) || !same(b.activity, r.activity)) {
     const all = new Map();
-    [...(r.activity || []), ...(l.activity || [])].forEach(e => e?.id && all.set(e.id, e));
-    out.activity = [...all.values()].sort((x, y) => String(x.at).localeCompare(String(y.at))).slice(-150);
+    [...(l.activity || []), ...(r.activity || [])].forEach(e => e?.id && all.set(e.id, e));
+    out.activity = [...all.values()].sort((x, y) => String(x.at).localeCompare(String(y.at))).slice(-CAP);
   }
   if (!same(b.review, l.review)) {
     if (!r.review || same(b.review, r.review)) out.review = l.review;

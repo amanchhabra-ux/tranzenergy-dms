@@ -2,7 +2,8 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { ExcelViewer } from './ExcelViewer';
 import { PdfViewer } from './PdfViewer';
-import { buildCrsTable, downloadCrs, readCrs, crsFieldUpdates, loadBytes, sniffType } from '../utils/crs';
+import { buildCrsTable, downloadCrs, readCrs, crsFieldUpdates, loadBytes, sniffType, consultantCrs, saveBytes } from '../utils/crs';
+import { isExternal } from '../utils/workflow';
 import { Download, FileSpreadsheet, ListChecks, FileText, Send, CheckCircle2, Loader2, AlertCircle, MessageSquarePlus, Trash2 } from 'lucide-react';
 
 const STATUS_STYLE = {
@@ -65,6 +66,14 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawing.id, drawing.crsData, drawing.crsFileType]);
+
+  // an outside consultant downloads the issued CRS with their own comments added
+  const issuedForMe = isExternal(currentUser) && !!(drawing.review?.issued?.url || drawing.review?.cycles?.some(c => c.issued?.url));
+  const downloadCrsFor = async () => {
+    if (!issuedForMe) { downloadCrs(drawing, project); return; }
+    try { const c = await consultantCrs(drawing, currentUser?.id); if (c) saveBytes(c.bytes, c.fileName); }
+    catch (err) { alert('Could not build the CRS: ' + err.message); }
+  };
 
   const rows = useMemo(
     () => buildCrsTable(lazyImport ? { ...drawing, crsImported: lazyImport } : drawing),
@@ -153,7 +162,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingRight: 8, fontSize: 11 }}>
             {syncBadge}
             <span style={{ color: 'var(--text-muted)' }}>{rows.length} · {openCount} open</span>
-            <button className="btn btn-secondary btn-sm" disabled={!rows.length} onClick={() => { downloadCrs(drawing, project); recordDownload(drawing.id, 'crs'); }} title="Download the auto CRS as a new Excel">
+            <button className="btn btn-secondary btn-sm" disabled={!rows.length} onClick={() => { downloadCrsFor(); recordDownload(drawing.id, 'crs'); }} title={issuedForMe ? 'Download the CRS as issued, with your comments added' : 'Download the auto CRS as a new Excel'}>
               <Download size={13} />
             </button>
           </div>

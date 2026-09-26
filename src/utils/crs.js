@@ -476,3 +476,53 @@ export async function buildIssuedCrs(drawing, project) {
   const out = await applyCrsCells(base, plan.cells);
   return { bytes: out, layout: plan.layout, rowMap: plan.rowMap, fileName };
 }
+
+// ─── The CRS an outside consultant downloads ────────────────────────────────
+/**
+ * Built only from the consultant's (filtered) view of the drawing, never from the working
+ * file: the frozen issued copy as base, plus the consultant's own comments (their pins and
+ * CRS rows, and their replies on issued pins) written into it. With none, the issued
+ * file as it is. → { bytes, fileName } or null when no CRS has been issued yet.
+ */
+export async function consultantCrs(drawing, userId) {
+  const r = drawing.review || {};
+  const issued = r.issued || (r.cycles || []).slice(-1)[0]?.issued || null;
+  if (!issued?.url) return null;
+  const bytes = await loadBytes(issued.url);
+  const fileName = issued.fileName || `${drawing.code}_CRS.xlsx`;
+  const rowMap = issued.rowMap || {};
+  const pins = new Map((drawing.pins || []).map(p => [p.id, p]));
+  const own = buildCrsTable(drawing).filter(row => {
+    if (row.internal) return false;
+    if (row.kind === 'pin') {
+      const pin = pins.get(row.pinId);
+      if (pin?.authorId === userId) return true;
+      // their reply on a pin that went out in the issued sheet: update that row in place
+      return row.key in rowMap && (pin?.comments || []).some(c => c.authorId === userId);
+    }
+    return row.kind === 'local' && drawing.crsImported?.[row.idx]?.authorId === userId;
+  });
+  if (!own.length) return { bytes, fileName };
+  let layout = issued.layout;
+  let known = new Set();
+  if (!layout || !issued.rowMap) {
+    // issued before the row map was kept: find the table, and skip rows already in the file
+    const parsed = parseCrsRows(await loadWorkbookRows(bytes));
+    layout = layout || parsed.layout;
+    known = new Set(parsed.comments.map(c => normText(c.comment)));
+  }
+  if (!layout) return { bytes, fileName };
+  const rows = own.filter(row => row.key in rowMap || !known.has(normText(row.comment)));
+  if (!rows.length) return { bytes, fileName };
+  const plan = planCrsWrites(layout, rows, rowMap, []);
+  return { bytes: await applyCrsCells(bytes, plan.cells), fileName };
+}
+
+/** Offer bytes to the browser as a file download. */
+export function saveBytes(bytes, fileName) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
