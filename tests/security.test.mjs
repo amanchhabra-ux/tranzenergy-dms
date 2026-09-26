@@ -18,6 +18,7 @@ console.log = ((log) => (...a) => { if (!String(a[0]).startsWith('[notify]')) lo
 const { makeSessionCookie } = await import('../api/_lib/session.js');
 const { forgetMembers } = await import('../api/_lib/state.js');
 const saveState = (await import('../api/save-state.js')).default;
+const uploadUrl = (await import('../api/r2-upload-url.js')).default;
 
 const USERS = [
   { id: 'u1', name: 'Aman Chhabra', email: 'aman@tranzenergy.in', role: 'Admin', avatar: 'AC', color: '#3f7d3a' },
@@ -188,6 +189,29 @@ await test('first run: bootstrap owner creates the workspace -> 200', async () =
   assert.ok(fs.existsSync(stateFile));
 });
 
+
+// ── Uploads never replace an existing file; consultants upload drawings only ───
+await test('upload URL: fresh key for every upload, never the requested (existing) key', async () => {
+  seed(baseState());
+  Object.assign(process.env, { R2_ACCOUNT_ID: 'acc', R2_ACCESS_KEY_ID: 'id', R2_SECRET_ACCESS_KEY: 'secret', R2_BUCKET: 'bucket' });
+  try {
+    const want = 'crs/E-001/1727000000000_E-001_CRS_issued.xlsx';
+    const a = await call(uploadUrl, EMAIL.u2, { pathname: want });
+    const b = await call(uploadUrl, EMAIL.u2, { pathname: want });
+    assert.equal(a.statusCode, 200, JSON.stringify(a.body));
+    assert.notEqual(a.body.key, want);
+    assert.notEqual(a.body.key, b.body.key);
+    assert.match(a.body.key, /^crs\/E-001\/\d{19}_E-001_CRS_issued\.xlsx$/);
+    assert.ok(a.body.uploadUrl.includes(encodeURIComponent(a.body.key.split('/').pop())));
+    const c = await call(uploadUrl, EMAIL.u7, { pathname: 'crs/E-001/1727000000000_E-001_CRS_issued.xlsx' });
+    assert.equal(c.statusCode, 403);
+    const d = await call(uploadUrl, EMAIL.u7, { pathname: 'drawings/E-001/sld.pdf' });
+    assert.equal(d.statusCode, 200);
+    assert.match(d.body.key, /^drawings\/E-001\/\d{19}_sld\.pdf$/);
+  } finally {
+    for (const k of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']) delete process.env[k];
+  }
+});
 
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
