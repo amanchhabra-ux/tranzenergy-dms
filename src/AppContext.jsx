@@ -4,6 +4,8 @@ import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } fr
 import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
+import { nextRevision } from './utils/mdl';
+import { applyPlan } from './utils/mdlImport';
 
 export const AppContext = createContext(null);
 
@@ -766,7 +768,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
 
   // ─── Revision Upload ───────────────────────────────────────────────────────
-  const uploadRevision = useCallback((drawingId, changeSummary, pdfDataUrl, newStatus) => {
+  // opts.version: the revision of the file, used when the drawing is an expected MDL record
+  // (nothing received yet: R0 unless given); a received drawing goes up by one.
+  const uploadRevision = useCallback((drawingId, changeSummary, pdfDataUrl, newStatus, opts = {}) => {
     if (!canDo('upload')) return '';
     const authorName = currentUser?.name || 'System';
     let nextVer = '';
@@ -774,12 +778,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const cur = dwg.currentVersion || 'R0';
-      if (cur.match(/^R\d+$/)) {
-        nextVer = `R${parseInt(cur.substring(1)) + 1}`;
-      } else {
-        nextVer = `R${parseInt(cur.replace(/\D/g,'') || '0') + 1}`;
-      }
+      nextVer = nextRevision(dwg, opts.version);
       const rev = {
         version: nextVer,
         date: new Date().toISOString().replace('T',' ').substring(0,16),
@@ -787,9 +786,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         changeSummary: changeSummary || `Revision ${nextVer} uploaded.`,
         pdfData: pdfDataUrl || null
       };
-      logMsg = `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
+      logMsg = dwg.expected
+        ? `<strong>${authorName}</strong> uploaded <strong>${dwg.code}</strong> ${nextVer}: first file received for this MDL record.`
+        : `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
       const next = {
         ...dwg,
+        ...(dwg.expected ? { expected: false } : {}),
         currentVersion: nextVer,
         pdfData: pdfDataUrl || dwg.pdfData,
         versions: [rev, ...(dwg.versions || [])]
@@ -889,7 +891,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const startReview = (drawingId) => {
     const d = drawings.find(x => x.id === drawingId);
     const p = projectOf(d);
-    if (!d || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return;
+    if (!d || d.expected || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return; // nothing to review until a file arrives
     setDrawings(prev => prev.map(x => (x.id === drawingId ? { ...x, review: newReview(x, p, x.review) } : x)));
     addLog(`Review started for <strong>${d.code}</strong> ${d.currentVersion}.`);
   };
@@ -992,6 +994,22 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     addLog('Review workflow settings updated.');
   };
 
+  // ─── MDL import ────────────────────────────────────────────────────────────
+  // plan from utils/mdlImport buildPlan(). One state change: new expected records, updated
+  // MDL columns of existing ones (never deleted), the project's columns and saved mapping.
+  const importMdl = (projectId, plan) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project || !canDo('upload') || isExternal(currentUser)) return null;
+    const res = applyPlan(plan, { project, drawings: drawings.filter(d => d.projectId === projectId), user: currentUser, uid });
+    const changed = new Map(res.drawings.filter(d => res.updatedIds.includes(d.id)).map(d => [d.id, d]));
+    const created = res.drawings.filter(d => res.createdIds.includes(d.id));
+    setDrawings(prev => [...created, ...prev.map(d => changed.get(d.id) || d)]);
+    setProjects(prev => prev.map(p => (p.id === projectId ? { ...p, mdlColumns: res.columns, mdlImportMap: res.mdlImportMap } : p)));
+    if (res.newDisciplines.length) setDisciplines(prev => withOther([...prev, ...res.newDisciplines.filter(x => !prev.includes(x))]));
+    addLog(`MDL import to <strong>${project.code}</strong>: ${res.created} new expected record${res.created === 1 ? '' : 's'}, ${res.updated} updated.`);
+    return res;
+  };
+
   // ─── Organisation settings ────────────────────────────────────────────────
   const updateOrg = (updates) => {
     if (!canDo('admin')) return;
@@ -1084,6 +1102,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       recordDownload,
       // Review workflow
       startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
+      // MDL
+      importMdl,
       // Users
       createUser, updateUser, deleteUser,
       // Disciplines
