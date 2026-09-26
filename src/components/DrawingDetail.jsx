@@ -14,6 +14,7 @@ import { ReviewBar } from './ReviewBar';
 import { ActivityPanel } from './ActivityPanel';
 import { markSeen, seenAt } from '../utils/activity';
 import { isExternal } from '../utils/workflow';
+import { nextRevision } from '../utils/mdl';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -289,7 +290,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
           {canDo('upload') && (
             <button className="btn btn-primary btn-sm" onClick={() => setShowUploadModal(true)}>
               <FileUp size={14} />
-              <span>Upload revision</span>
+              <span>{drawing.expected ? 'Upload first issue' : 'Upload revision'}</span>
             </button>
           )}
         </div>
@@ -298,6 +299,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
       {/* Revisions + view switch */}
       <div className="revision-timeline">
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginRight: 4, whiteSpace: 'nowrap' }}>Revisions</span>
+        {drawing.expected && <span className="stage-chip s-expected" title="Listed in the MDL; no file received yet">Expected</span>}
         {sortedVersions.map((v, i) => (
           <React.Fragment key={v.version}>
             {i > 0 && <div className="revision-connector" />}
@@ -595,12 +597,8 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, att
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
-  // Calculate next version
-  const nextVer = (() => {
-    const cur = currentVersion || 'R0';
-    if (cur.match(/^R\d+$/)) return `R${parseInt(cur.substring(1)) + 1}`;
-    return `R${parseInt(cur.replace(/\D/g,'') || 0) + 1}`;
-  })();
+  const [firstRev, setFirstRev] = useState('R0'); // expected MDL record: the revision of the first file
+  const nextVer = nextRevision(drawing, firstRev);
 
   const handleFile = async (file) => {
     if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
@@ -694,7 +692,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, att
       const blobPath = `drawings/${drawing.code.trim().toUpperCase()}/${pdfFile.name}`;
       const blob = await uploadFile(blobPath, pdfFile);
       
-      uploadRevision(drawing.id, summary, blob.url);
+      uploadRevision(drawing.id, summary, blob.url, undefined, { version: firstRev });
       if (crsFile) {
         try {
           await attachCrs(crsFile);
@@ -717,7 +715,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, att
           <div>
             <div className="modal-title">Upload Revision — {drawing.code}</div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Current: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{currentVersion}</span>
+              {drawing.expected ? 'Listed in the MDL, nothing received yet' : <>Current: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{currentVersion}</span></>}
               {' → '}Next: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--primary-light)', fontWeight: 700 }}>{nextVer}</span>
             </div>
           </div>
@@ -765,6 +763,14 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, att
               {parsed.title && <span style={{ color: 'var(--text-secondary)' }}>— {parsed.title.slice(0,60)}</span>}
               {parsed.rev && <span style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--warning)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>Rev {parsed.rev}</span>}
               {!parsed.dwgNo && !parsed.title && !parsed.rev && <span style={{ color: 'var(--text-muted)' }}>No structured data found in PDF title block.</span>}
+            </div>
+          )}
+
+          {drawing.expected && (
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label">Revision of this file</label>
+              <input className="form-input" style={{ fontFamily: 'var(--font-mono)', width: 120 }} value={firstRev}
+                onChange={e => setFirstRev(e.target.value.toUpperCase())} placeholder="R0" />
             </div>
           )}
 

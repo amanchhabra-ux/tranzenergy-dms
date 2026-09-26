@@ -3,7 +3,7 @@ import { AppContext } from '../AppContext';
 import { Zap, Lock, X, Upload, Database } from 'lucide-react';
 
 export function Login() {
-  const { login, users, importWorkspaceData } = useContext(AppContext);
+  const { login, users, importWorkspaceData, org } = useContext(AppContext);
   const [selectedAdmin, setSelectedAdmin] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
@@ -78,7 +78,7 @@ export function Login() {
             <Zap size={32} color="#fff" />
           </div>
           <div>
-            <div className="login-brand-name-modern">Tranzenergy</div>
+            <div className="login-brand-name-modern">{org.name}</div>
             <div className="login-brand-sub-modern">Enterprise Document Control</div>
           </div>
         </div>
@@ -94,7 +94,7 @@ export function Login() {
               type="email"
               className="form-input"
               style={{ width: '100%' }}
-              placeholder="e.g. pm@tranzenergy.in or viewer@tranzenergy.in"
+              placeholder="name@company.com"
               value={email}
               onChange={e => setEmail(e.target.value)}
               required

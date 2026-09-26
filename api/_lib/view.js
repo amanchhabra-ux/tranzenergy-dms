@@ -56,6 +56,7 @@ export function externalView(state, user) {
     proposals: [],
     activityLog: (state.activityLog || []).filter(l => loggedBy(l, user)),
     disciplines: state.disciplines || [],
+    org: state.org || {},
   };
 }
 
@@ -206,6 +207,7 @@ function mergeDrawing(sd, inc, user, project, taken, now) {
     out.versions = [...added, ...(sd.versions || [])];
     out.currentVersion = str(inc.currentVersion, 40) || added[0].version;
     out.pdfData = fileLink(inc.pdfData, taken, own) || added[0].pdfData || sd.pdfData;
+    if (sd.expected) out.expected = false; // first file of a record listed in the MDL
   }
   for (const k of ['title', 'description', 'subType', 'clientName', 'consultant', 'contractor']) {
     if (typeof inc[k] === 'string' && inc[k] !== sd[k]) out[k] = inc[k];

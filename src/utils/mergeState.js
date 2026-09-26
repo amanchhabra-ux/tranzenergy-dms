@@ -95,6 +95,8 @@ export function mergeState(base, local, remote) {
     proposals: mergeById(base.proposals, local.proposals, remote.proposals),
     activityLog: mergeLog(local.activityLog, remote.activityLog),
     disciplines: mergeList(base.disciplines, local.disciplines, remote.disciplines),
+    // organisation settings: ours if we changed them, else theirs
+    org: same(base.org || {}, local.org || {}) ? (remote.org || {}) : (local.org || {}),
   };
 }
 

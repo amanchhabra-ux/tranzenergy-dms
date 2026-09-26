@@ -69,8 +69,8 @@ export const daysBetween = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - ne
 export const defaultWorkflow = () => ({
   enabled: true,
   turnaroundDays: DEFAULT_TURNAROUND_DAYS,
-  consultantName: 'Atlanta (AEL)',
-  clientName: 'RPCL',
+  consultantName: '',
+  clientName: '',
   firstReviewers: [], secondReviewers: [], approvers: [], consultantUsers: [], issueNotify: [],
   finalCheck: false, // second reviewer's "ready" sends the CRS to the consultant
   crsTemplate: null,

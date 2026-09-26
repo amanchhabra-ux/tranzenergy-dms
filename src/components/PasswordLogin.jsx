@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { usePublicOrg } from '../utils/useOrg';
 
 export function PasswordLogin() {
+  const org = usePublicOrg();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -29,7 +31,7 @@ export function PasswordLogin() {
       <div className="login-animated-bg" />
       <div className="login-glass-card">
         <div className="login-brand-modern login-brand-logo">
-          <img src="/logo.png" alt="Tranz Energy" />
+          {org.logoUrl ? <img src={org.logoUrl} alt={org.name} /> : <div className="login-brand-name-modern">{org.name}</div>}
           <div className="login-brand-sub-modern">Enterprise Document Control</div>
         </div>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

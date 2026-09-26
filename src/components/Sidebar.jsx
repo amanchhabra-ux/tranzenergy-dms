@@ -14,7 +14,7 @@ const TYPE_META = {
 };
 
 export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = false, reviewCount = { total: 0, overdue: 0 } }) {
-  const { currentUser, projects, drawings, canDo, logout, authMode } = useContext(AppContext);
+  const { currentUser, projects, drawings, canDo, logout, authMode, org } = useContext(AppContext);
   const [showPw, setShowPw] = React.useState(false);
 
   const filteredProjects = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
@@ -26,7 +26,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
       {/* Brand */}
       <div className="sidebar-brand">
         <div className="sidebar-brand-logo">
-          <img src="/logo.png" alt="Tranz Energy" />
+          {org.logoUrl ? <img src={org.logoUrl} alt={org.name} /> : <div className="sidebar-brand-name">{org.name}</div>}
           <div className="sidebar-brand-sub">Engineering DMS</div>
         </div>
       </div>
@@ -77,7 +77,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
           );
         })}
 
-        {/* Settings & Sync (TranzEnergy staff only) */}
+        {/* Settings & Sync (internal staff only) */}
         {!isExternal(currentUser) && (<>
         <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Settings</div>
         <div
