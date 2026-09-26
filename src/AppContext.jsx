@@ -974,7 +974,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
 
   const updateWorkflow = (projectId, workflow) => {
-    if (!canDo('manage_projects')) return;
+    if (!canDo('admin')) return; // the server accepts workflow changes from admins only
     setProjects(prev => prev.map(p => (p.id === projectId ? { ...p, workflow: { ...(p.workflow || {}), ...workflow } } : p)));
     addLog('Review workflow settings updated.');
   };

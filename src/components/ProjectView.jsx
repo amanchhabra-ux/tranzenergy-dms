@@ -125,7 +125,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
         </div>
         {canDo('upload') && (
           <div style={{ display: 'flex', gap: '8px' }}>
-            {canDo('manage_projects') && (
+            {canDo('admin') && (
               <button className="btn btn-secondary btn-sm" onClick={() => setShowWorkflow(true)} title="Review workflow settings">
                 <Workflow size={14} /><span>Workflow</span>
               </button>
