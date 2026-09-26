@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, addDays, today, canActOnStage, DEFAULT_TURNAROUND_DAYS, EXTERNAL_ROLE, issuingStage, stageName } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
@@ -851,28 +851,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   });
 
   // Steps 1–2: a submission is registered → review cycle starts at internal review 1
-  const newReview = (d, project, prev, note = '') => {
-    const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
-    const cycle = (prev?.cycle || 0) + 1;
-    const archived = prev ? [...(prev.cycles || []), {
-      cycle: prev.cycle, version: prev.version, category: prev.category || null,
-      stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
-    }] : [];
-    const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
-    const subNote = String(note || '').trim();
-    return {
-      cycle, version: d.currentVersion || 'R0', stage: 'ir1',
-      startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
-      // the uploader's note for the reviewers (step 1)
-      note: subNote ? { text: subNote, by: currentUser?.name || 'Someone', at: new Date().toISOString() } : null,
-      cycles: archived,
-      history: [...(prev?.history || []), histEntry(prev ? 'resubmitted' : 'registered', {
-        to: 'ir1', version: d.currentVersion || 'R0',
-        note: (prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`)
-          + (subNote ? `\nNote: ${subNote}` : ''),
-      })],
-    };
-  };
+  const newReview = (d, project, prev, note = '') => newReviewFor(d, project, prev, { entry: histEntry, note, by: currentUser?.name });
   const withNewReview = (d, project, note) => (workflowOn(project) ? { ...d, review: newReview(d, project, d.review, note) } : d);
 
   const startReview = (drawingId) => {

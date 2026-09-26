@@ -17,6 +17,7 @@ console.log = ((log) => (...a) => { if (!String(a[0]).startsWith('[notify]')) lo
 
 const { makeSessionCookie } = await import('../api/_lib/session.js');
 const { forgetMembers } = await import('../api/_lib/state.js');
+const { externalView } = await import('../api/_lib/view.js');
 const saveState = (await import('../api/save-state.js')).default;
 const uploadUrl = (await import('../api/r2-upload-url.js')).default;
 
@@ -62,6 +63,8 @@ function seed(state) {
 }
 const stored = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 const EMAIL = Object.fromEntries(USERS.map(u => [u.id, u.email]));
+// what a consultant's browser holds: their view of the stored workspace
+const viewOf = (id) => structuredClone(externalView(stored(), USERS.find(u => u.id === id)));
 
 function mockRes() {
   return {
@@ -211,6 +214,79 @@ await test('upload URL: fresh key for every upload, never the requested (existin
   } finally {
     for (const k of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']) delete process.env[k];
   }
+});
+
+// ── Finding 2: a new revision from a consultant restarts the review on server values ──
+const addDaysIso = (n) => { const d = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const newRevision = (v, file) => {
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.versions = [{ version: 'R1', date: '2026-09-26 10:00', author: 'Atlanta Engineer', changeSummary: 'R1', pdfData: file }, ...d.versions];
+  d.currentVersion = 'R1';
+  d.pdfData = file;
+  return d;
+};
+
+await test('consultant new-cycle save with stage closed / category 1 -> stored review is ir1 with server values', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  const d = newRevision(v, PDF('drawings/E-001/1727000000000123456_sld_r1.pdf'));
+  d.review = { ...d.review, cycle: 2, stage: 'closed', category: '1', dueDate: '2099-01-01', closedAt: '2026-09-26',
+    note: { text: 'R1 addresses all comments', by: 'Aman Chhabra' },
+    history: [...d.review.history, { id: 'forged', action: 'category', by: 'u1', byName: 'Aman Chhabra', to: 'closed', category: '1' }] };
+  const r = await post(EMAIL.u7, { state: v, etag: null });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const rv = stored().drawings.find(x => x.id === 'd1').review;
+  assert.equal(rv.stage, 'ir1');
+  assert.equal(rv.cycle, 2);
+  assert.equal(rv.category, null);
+  assert.equal(rv.version, 'R1');
+  assert.equal(rv.dueDate, addDaysIso(10));
+  assert.equal(rv.cycles.length, 1);
+  assert.equal(rv.cycles[0].stage, 'resubmit');
+  assert.ok(!rv.history.some(h => h.id === 'forged'), 'forged history entry kept');
+  const last = rv.history[rv.history.length - 1];
+  assert.equal(last.action, 'resubmitted');
+  assert.equal(last.by, 'u7');
+  assert.equal(rv.note.text, 'R1 addresses all comments');
+  assert.equal(rv.note.by, 'Atlanta Engineer');
+});
+
+await test('consultant forwarding to the client: history entry written by the server', async () => {
+  const s = baseState();
+  s.drawings[0].review.stage = 'consultant';
+  seed(s);
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.review = { ...d.review, stage: 'client', category: '1',
+    history: [...d.review.history, { id: 'forged', action: 'category', by: 'u1', byName: 'Aman Chhabra', note: 'sent' }] };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings.find(x => x.id === 'd1').review;
+  assert.equal(rv.stage, 'client');
+  assert.equal(rv.category, '3');
+  const last = rv.history[rv.history.length - 1];
+  assert.deepEqual([last.action, last.by, last.from, last.to, last.note], ['advanced', 'u7', 'consultant', 'client', 'sent']);
+  assert.ok(!rv.history.some(h => h.id === 'forged'));
+});
+
+await test('consultant linking another record\'s file -> link dropped, file not in their view', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  newRevision(v, PDF('crs/X-009/1_crs.xlsx'));
+  v.drawings.push({ id: 'dNew', code: 'E-002', title: 'Layout', projectId: 'p1', currentVersion: 'R0', pdfData: PDF('proposals/offer.pdf'),
+    crsData: PDF('drawings/X-009/1_secret.pdf'), versions: [{ version: 'R0', pdfData: PDF('drawings/X-009/1_secret.pdf') }], pins: [] });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const st = stored();
+  const d1 = st.drawings.find(x => x.id === 'd1');
+  assert.equal(d1.versions[0].version, 'R1');
+  assert.equal(d1.versions[0].pdfData, null);
+  assert.equal(d1.pdfData, PDF('drawings/E-001/1_sld.pdf'));
+  const dn = st.drawings.find(x => x.id === 'dNew');
+  assert.equal(dn.pdfData, null);
+  assert.equal(dn.crsData, null);
+  assert.equal(dn.versions[0].pdfData, null);
+  const { filesInView } = await import('../api/_lib/view.js');
+  const files = filesInView(externalView(st, USERS.find(u => u.id === 'u7')));
+  for (const f of [PDF('crs/X-009/1_crs.xlsx'), PDF('proposals/offer.pdf'), PDF('drawings/X-009/1_secret.pdf')]) assert.ok(!files.has(f), f);
 });
 
 const failed = results.filter(r => !r[0]).length;
