@@ -7,8 +7,8 @@ import { readCrs } from '../utils/crs';
 
 const ROLE_ROWS = [
   { key: 'consultantUsers', step: 1, label: 'Consultant — uploads & sends to client', hint: 'Uploads the first copy with a note (Atlanta logins); once the CRS is ready, sends it to the client' },
-  { key: 'firstReviewers',  step: 2, label: 'Reviewer 1', hint: 'Reviews and comments first (e.g. Kiran, TranzEnergy engineer)' },
-  { key: 'secondReviewers', step: 3, label: 'Reviewer 2 — review & CRS', hint: 'Downloads, reviews, adds comments to the CRS and marks it ready for the consultant (e.g. Jacopo)' },
+  { key: 'firstReviewers',  step: 2, label: 'TE Engineer 1', hint: 'Reviews and comments first' },
+  { key: 'secondReviewers', step: 3, label: 'TE Review Engineer — review & CRS', hint: 'Downloads, reviews, adds comments to the CRS and marks it ready for the consultant' },
   { key: 'approvers',       step: 4, label: 'Final check & submit', hint: 'Only if a separate final check is switched on below', finalOnly: true },
   { key: 'issueNotify',     step: null, label: 'Also notify when the CRS is ready', hint: 'Told when the CRS goes to the consultant (e.g. Noor)' },
 ];

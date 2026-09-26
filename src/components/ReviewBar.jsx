@@ -25,8 +25,8 @@ function stepList(project, users) {
   };
   const steps = [
     { key: 'upload', label: `${cons} upload`, stages: ['resubmit'] },
-    { key: 'ir1', label: who('firstReviewers') ? `${who('firstReviewers')} review` : 'Review 1', stages: ['ir1'] },
-    { key: 'ir2', label: who('secondReviewers') ? `${who('secondReviewers')} review${finalCheckOn(wf) ? '' : ' + CRS'}` : (finalCheckOn(wf) ? 'Review 2' : 'Review & CRS'), stages: ['ir2'] },
+    { key: 'ir1', label: 'TE Engineer 1', stages: ['ir1'] },
+    { key: 'ir2', label: finalCheckOn(wf) ? 'TE Review Engineer' : 'TE Review Engineer + CRS', stages: ['ir2'] },
     ...(finalCheckOn(wf) ? [{ key: 'approval', label: who('approvers') ? `${who('approvers')} check` : 'Final check', stages: ['approval'] }] : []),
     { key: 'consultant', label: `${cons} → ${client}`, stages: ['consultant'] },
     { key: 'client', label: `${client} category`, stages: ['client'] },
@@ -170,7 +170,7 @@ function AdvanceModal({ drawing, project, onClose }) {
   const next = stageActors(project, to).map(id => users.find(u => u.id === id)?.name).filter(Boolean);
   const cons = shortName(project.workflow.consultantName, 'the consultant');
   const client = shortName(project.workflow.clientName, 'the client');
-  const nextName = next[0]?.split(' ')[0] || 'the next reviewer';
+  const nextName = to === 'ir2' ? 'the TE Review Engineer' : (next[0]?.split(' ')[0] || 'the next reviewer');
   const text = {
     ir1: `Your comments go to ${nextName}${finalCheckOn(project.workflow) ? '' : `, who reviews, adds the CRS comments and makes it ready for ${cons}`}. They stay internal until the CRS goes to ${cons}.`,
     ir2: 'The merged comments go to the final check before submission.',

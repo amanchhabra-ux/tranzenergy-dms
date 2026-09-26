@@ -10,12 +10,12 @@
 //   A new revision after Cat 3/4B restarts at step 1 with the comments carried forward.
 //
 // RPCL arrangement (26.09.2026) — no separate final check:
-//   Atlanta uploads (with a note) → Kiran reviews → Jacopo downloads, reviews, adds CRS comments
+//   Atlanta uploads (with a note) → TE Engineer 1 reviews → TE Review Engineer downloads, reviews, adds CRS comments
 //   and marks it ready → CRS issued to Atlanta → Atlanta sends it to RPCL → RPCL category.
 
 export const STAGES = [
-  { key: 'ir1',        step: 3, label: 'Review 1',           short: 'Review 1', who: 'firstReviewers',  action: 'Mark my review done' },
-  { key: 'ir2',        step: 4, label: 'Review 2',           short: 'Review 2', who: 'secondReviewers', action: 'Mark review 2 done' },
+  { key: 'ir1',        step: 3, label: 'TE Engineer 1',      short: 'TE Eng 1', who: 'firstReviewers',  action: 'Mark my review done' },
+  { key: 'ir2',        step: 4, label: 'TE Review Engineer', short: 'TE Review', who: 'secondReviewers', action: 'Mark review done' },
   { key: 'approval',   step: 5, label: 'Final check',        short: 'Check',    who: 'approvers',       action: 'Submit to consultant' },
   { key: 'consultant', step: 7, label: 'With consultant',    short: 'Consultant', who: 'consultantUsers', action: 'Send to client' },
   { key: 'client',     step: 8, label: 'With client',        short: 'Client',   who: 'recorders',       action: 'Record client category' },
@@ -51,7 +51,7 @@ export const shortOrg = (s, fallback) => (s || fallback).replace(/\s*\(.*\)\s*$/
 /** A stage's name for this project ("With Atlanta", "Review & CRS"…). */
 export function stageName(project, key) {
   const wf = project?.workflow || {};
-  if (key === 'ir2' && !finalCheckOn(wf)) return 'Review & CRS';
+  if (key === 'ir2' && !finalCheckOn(wf)) return 'TE Review Engineer + CRS';
   if (key === 'consultant') return `With ${shortOrg(wf.consultantName, 'consultant')}`;
   if (key === 'client') return `With ${shortOrg(wf.clientName, 'client')}`;
   return STAGE[key]?.label || key;
