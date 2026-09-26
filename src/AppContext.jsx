@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
-import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel } from './utils/crs';
+import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, addDays, today, canActOnStage, DEFAULT_TURNAROUND_DAYS, EXTERNAL_ROLE, issuingStage, stageName } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 
 export const AppContext = createContext(null);
@@ -24,6 +25,11 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 // `force` also creates an Excel when the drawing has none yet (changes made in the CRS panel).
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
+// Per-drawing activity trail: file uploaded / downloaded, comment added / closed (newest last)
+const ACTIVITY_CAP = 150;
+const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), entry].slice(-ACTIVITY_CAP) });
+const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
+const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
 
 // Avatar colours from older palettes → Tranz Energy green palette
 const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#5a9a44': '#2f6a2f', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b',
@@ -41,7 +47,7 @@ const mergeUsers = (a = [], b = []) => {
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
 const STATUSES = ['IFA', 'AFC', 'Superseded'];
-const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer'];
+const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer', EXTERNAL_ROLE];
 const SEED_PROPOSALS = [];
 
 const STORAGE_KEY = 'tranzenergy_v5';
@@ -152,7 +158,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const saving = useRef(false);
   const pushAgain = useRef(false);
 
+  const pulling = useRef(null);      // the cloud load in progress (loads never overlap)
+  const allowEmptyPush = useRef(false); // set by Reset Workspace, the one time an empty workspace may be saved
   const applyState = useCallback((s) => {
+    // keep the ref in step right away — code running before the next render must see this state
+    stateRef.current = { ...stateRef.current, ...s, users: s.users?.length ? recolorUsers(s.users) : SEED_USERS, disciplines: withOther(s.disciplines) };
     setUsers(s.users?.length ? recolorUsers(s.users) : SEED_USERS);
     setProjects(s.projects || []);
     setDrawings(s.drawings || []);
@@ -176,6 +186,14 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (saving.current) { pushAgain.current = true; return; }
     const local = stripForCloud(stateRef.current);
     if (baseRef.current && stateEquals(local, baseRef.current)) return; // nothing new
+    // Safety net: never replace a workspace that has projects/drawings with an empty one,
+    // unless an admin just chose Reset Workspace.
+    const size = (x) => (x?.projects?.length || 0) + (x?.drawings?.length || 0);
+    if (baseRef.current && size(baseRef.current) > 0 && size(local) === 0 && !allowEmptyPush.current) {
+      console.error('Refusing to save an empty workspace over existing data');
+      return;
+    }
+    allowEmptyPush.current = false;
     saving.current = true;
     try {
       const res = await fetch('/api/save-state', {
@@ -213,6 +231,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Pull other people's changes (and recover if the first load failed)
   const pullFromCloud = useCallback(async () => {
     if (saving.current) return;
+    if (pulling.current) return pulling.current; // one load at a time
+    let done;
+    pulling.current = new Promise(r => { done = r; });
     try {
       const r = await fetchCloud(cloudReady.current ? etagRef.current : undefined);
       if (r.status === 'same') { setCloudStatus('ok'); return; }
@@ -245,6 +266,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     } catch (err) {
       console.error('Failed to load cloud database:', err);
       setCloudStatus('offline');
+    } finally {
+      pulling.current = null;
+      done();
     }
   }, [fetchCloud, applyState, pushToCloud]);
 
@@ -272,12 +296,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
   // Keep up with other people's changes
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') pullFromCloud(); };
+    const tick = () => { if (document.visibilityState === 'visible' && !needsLogin && !loading) pullFromCloud(); };
     const iv = setInterval(tick, 30000);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(iv); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); };
-  }, [pullFromCloud]);
+  }, [pullFromCloud, needsLogin, loading]);
 
   // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
@@ -352,6 +376,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     // action: 'admin' | 'manage_projects' | 'upload' | 'approve' | 'view'
     if (!currentUser) return false;
     const r = currentUser.role;
+    if (r === EXTERNAL_ROLE) {
+      // outside consultant (e.g. Atlanta): uploads submissions and comments, nothing else
+      return action === 'upload' || action === 'view';
+    }
+    if (action === 'sync') return true; // CRS Excel rewriting: internal users only
     if (r === 'Admin') return true;
     if (action === 'admin') return false;
     if (action === 'manage_projects') return r === 'Project Manager';
@@ -360,6 +389,32 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (action === 'view') return true;
     return false;
   }, [currentUser]);
+
+  // New comments made by TranzEnergy before the CRS is issued stay internal
+  // (hidden from the consultant) until the approver submits them.
+  const tagNew = useCallback((d) => {
+    const r = d?.review;
+    const t = {};
+    if (r?.stage) { t.stage = r.stage; t.cycle = r.cycle; }
+    if (r && PRE_ISSUE.has(r.stage) && !isExternal(currentUser)) t.vis = 'internal';
+    return t;
+  }, [currentUser]);
+
+  // One activity entry by the signed-in person. `internal` hides it from the consultant.
+  const ev = useCallback((type, extra = {}) => ({
+    id: uid('act'), type, at: new Date().toISOString(), by: currentUser?.id || null, byName: currentUser?.name || 'Someone', ...extra,
+  }), [currentUser]);
+
+  const pinEvent = (pin, type, status) => ev(type, {
+    pin: pin.label, status, text: snippet(pin.comments?.[0]?.text),
+    ...(pin.vis === 'internal' ? { vis: 'internal' } : {}),
+  });
+
+  // Downloads are recorded for everyone who can see the drawing (viewers too)
+  const recordDownload = useCallback((drawingId, what, fileName) => {
+    if (!currentUser) return;
+    setDrawings(prev => prev.map(d => (d.id !== drawingId ? d : withActivity(d, ev('download', { what, fileName: fileName || null, version: d.currentVersion })))));
+  }, [currentUser, ev]);
 
   // ─── Projects ──────────────────────────────────────────────────────────────
   const createProject = (data) => {
@@ -429,9 +484,11 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       }],
       pins: []
     };
-    setDrawings(prev => [dwg, ...prev]);
+    const proj = projects.find(p => p.id === dwg.projectId);
+    const started = withNewReview(withActivity(dwg, ev('upload', { what: 'drawing', version: startVer, ...(data.submissionNote ? { note: snippet(data.submissionNote) } : {}) })), proj, data.submissionNote);
+    setDrawings(prev => [started, ...prev]);
     addLog(`Drawing <strong>${dwg.code}</strong> registered by <strong>${currentUser?.name}</strong>.`);
-    return dwg;
+    return started;
   };
 
   const updateDrawing = (id, updates) => {
@@ -479,6 +536,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         (dwg.versions || []).forEach(v => { if (v.pdfData) deleteBlobUrl(v.pdfData); });
         if (dwg.crsData) deleteBlobUrl(dwg.crsData);
         if (dwg.crsPdf) deleteBlobUrl(dwg.crsPdf);
+        [dwg.review?.issued, ...(dwg.review?.cycles || []).map(c => c.issued)].forEach(i => { if (i?.url) deleteBlobUrl(i.url); });
         addLog(`Drawing <strong>${dwg.code}</strong> deleted.`);
       }
       return prev.filter(d => d.id !== id);
@@ -495,12 +553,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         // a signed/scanned CRS in PDF form: keep it for viewing, the Excel CRS stays as is
         if (d.crsPdf && d.crsPdf !== crsData) deleteBlobUrl(d.crsPdf);
         addLog(`CRS (PDF) uploaded for <strong>${d.code}</strong>.`);
-        return { ...d, crsPdf: crsData };
+        return withActivity({ ...d, crsPdf: crsData }, ev('upload', { what: 'crs-pdf', fileName: fileName || null, version: d.currentVersion }));
       }
       if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData); // replaced file
       addLog(`CRS uploaded for <strong>${d.code}</strong>.`);
-      if (!parsed) return { ...d, crsData };
-      return {
+      const upEv = ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion });
+      if (!parsed) return withActivity({ ...d, crsData }, upEv);
+      return withActivity({
         ...d,
         ...crsFieldUpdates(d, parsed.meta || {}),
         crsData,
@@ -511,23 +570,46 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsRowMap: pinRowMapFromImport(d, parsed.comments || []),
         crsFileName: fileName || d.crsFileName || null,
         crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
-      };
+      }, upEv);
     }));
   };
 
   // Comments added/edited in the CRS panel (not tied to a pin)
   const updateCrsItems = (drawingId, updater) => {
     if (!canDo('upload')) return;
-    setDrawings(prev => prev.map(d => (d.id === drawingId ? bumpCrs({ ...d, crsImported: updater(d.crsImported || []) }, true) : d)));
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const old = d.crsImported || [];
+      const before = new Set(old.map(c => c.id).filter(Boolean));
+      const items = updater(old).map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
+      // what changed → activity
+      let next = { ...d, crsImported: items };
+      items.forEach((c, i) => {
+        const prevItem = c.id ? old.find(o => o.id === c.id) : old[i];
+        const internal = c.vis === 'internal' ? { vis: 'internal' } : {};
+        if (!prevItem) { next = withActivity(next, ev('comment', { text: snippet(c.comment), ...internal })); return; }
+        if (String(c.reply || '') !== String(prevItem.reply || '') && String(c.reply || '').length > String(prevItem.reply || '').length) {
+          next = withActivity(next, ev('comment', { reply: true, text: snippet(String(c.reply).split('\n').pop()), on: snippet(c.comment), ...internal }));
+        }
+        if (isClosedStatus(c.status) !== isClosedStatus(prevItem.status)) {
+          next = withActivity(next, ev(isClosedStatus(c.status) ? 'closed' : 'reopened', { status: c.status, text: snippet(c.comment), ...internal }));
+        }
+      });
+      return bumpCrs(next, true);
+    }));
   };
 
   // Set a pin's status from the CRS: 'Open' | 'Resolved' | 'Accepted'
   const setPinStatus = (drawingId, pinId, status) => {
     if (!canDo(status === 'Accepted' ? 'approve' : 'upload')) return;
-    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs({
-      ...d,
-      pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }),
-    }, true)));
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const pin = (d.pins || []).find(p => p.id === pinId);
+      const wasClosed = !!(pin?.resolved || pin?.accepted);
+      let next = { ...d, pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }) };
+      if (pin && wasClosed !== (status !== 'Open')) next = withActivity(next, pinEvent(pin, status !== 'Open' ? 'closed' : 'reopened', status));
+      return bumpCrs(next, true);
+    }));
   };
 
   // ─── Storage migration: swap old file links for new ones (e.g. Vercel Blob → R2) ──
@@ -622,7 +704,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const [syncKick, setSyncKick] = useState(0);
   const pendingSync = drawings.filter(crsNeedsSync).map(d => `${d.id}:${d.crsRev}`).join('|');
   useEffect(() => {
-    if (loading || !pendingSync || !canDo('upload') || syncBusy.current) return;
+    if (loading || !pendingSync || !canDo('upload') || !canDo('sync') || syncBusy.current) return;
     const t = setTimeout(async () => {
       const d = drawingsRef.current.find(crsNeedsSync);
       if (!d) return;
@@ -674,17 +756,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         pdfData: pdfDataUrl || null
       };
       logMsg = `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
-      return {
+      const next = {
         ...dwg,
         currentVersion: nextVer,
         pdfData: pdfDataUrl || dwg.pdfData,
         versions: [rev, ...(dwg.versions || [])]
       };
+      // a new revision restarts the review at step 1 (comments carried forward)
+      return withNewReview(withActivity(next, ev('upload', { what: 'revision', version: nextVer, note: snippet(changeSummary) })), projects.find(p => p.id === dwg.projectId), changeSummary);
     }));
 
     if (logMsg) addLog(logMsg);
     return nextVer;
-  }, [currentUser, addLog, canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, addLog, canDo, projects, ev]);
 
   // ─── Drawing Status ────────────────────────────────────────────────────────
   const setDrawingStatus = (id, status) => {
@@ -700,50 +785,199 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     let newPinId = null;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const label = (dwg.pins?.length || 0) + 1;
-      const pin = { id: `pin-${Date.now()}`, x, y, page: page || 1, label, resolved: false, comments: [] };
+      const label = Math.max(0, ...(dwg.pins || []).map(p => Number(p.label) || 0)) + 1;
+      const pin = { id: `pin-${Date.now()}`, x, y, page: page || 1, label, resolved: false, comments: [], authorId: currentUser?.id, ...tagNew(dwg) };
       newPinId = pin.id;
       return { ...dwg, pins: [...(dwg.pins || []), pin] };
     }));
     return newPinId;
-  }, [canDo]);
+  }, [canDo, tagNew, currentUser]);
 
   const addComment = useCallback((drawingId, pinId, text, type = 'internal') => {
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({
+      const updated = bumpCrs({
         ...dwg,
         pins: (dwg.pins || []).map(pin => {
           if (pin.id !== pinId) return pin;
           const comment = {
             id: `c-${Date.now()}`,
             author: currentUser?.name || 'Unknown',
+            authorId: currentUser?.id,
             text,
             date: new Date().toISOString().replace('T',' ').substring(0,16),
-            type
+            type,
+            ...tagNew(dwg),
           };
           return { ...pin, comments: [...pin.comments, comment] };
         })
       });
+      const pin = (dwg.pins || []).find(p => p.id === pinId);
+      return withActivity(updated, ev('comment', {
+        pin: pin?.label, reply: (pin?.comments || []).length > 0, text: snippet(text),
+        ...(tagNew(dwg).vis ? { vis: 'internal' } : {}),
+      }));
     }));
-  }, [currentUser, canDo]);
+  }, [currentUser, canDo, tagNew, ev]);
 
   const resolvePin = useCallback((drawingId, pinId) => {
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) });
+      const pin = dwg.pins.find(p => p.id === pinId);
+      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) };
+      return bumpCrs(pin ? withActivity(next, pinEvent(pin, pin.resolved ? 'reopened' : 'closed', pin.resolved ? 'Open' : 'Resolved')) : next);
     }));
-  }, [canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDo, ev]);
 
   const acceptPin = useCallback((drawingId, pinId) => {
     if (!canDo('approve')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) });
+      const pin = dwg.pins.find(p => p.id === pinId);
+      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) };
+      return bumpCrs(pin && !pin.accepted && !pin.resolved ? withActivity(next, pinEvent(pin, 'closed', 'Accepted')) : next);
     }));
-  }, [canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDo, ev]);
+
+
+  // ─── Review workflow ───────────────────────────────────────────────────────
+  const projectOf = (d) => projects.find(p => p.id === d?.projectId);
+  const histEntry = (action, extra = {}) => ({
+    id: uid('wf'), at: new Date().toISOString(), by: currentUser?.id || null, byName: currentUser?.name || 'System', action, ...extra,
+  });
+
+  // Steps 1–2: a submission is registered → review cycle starts at internal review 1
+  const newReview = (d, project, prev, note = '') => {
+    const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
+    const cycle = (prev?.cycle || 0) + 1;
+    const archived = prev ? [...(prev.cycles || []), {
+      cycle: prev.cycle, version: prev.version, category: prev.category || null,
+      stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
+    }] : [];
+    const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
+    const subNote = String(note || '').trim();
+    return {
+      cycle, version: d.currentVersion || 'R0', stage: 'ir1',
+      startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+      // the uploader's note for the reviewers (step 1)
+      note: subNote ? { text: subNote, by: currentUser?.name || 'Someone', at: new Date().toISOString() } : null,
+      cycles: archived,
+      history: [...(prev?.history || []), histEntry(prev ? 'resubmitted' : 'registered', {
+        to: 'ir1', version: d.currentVersion || 'R0',
+        note: (prev ? `${d.currentVersion} received${carried ? ` — ${carried} comment${carried === 1 ? '' : 's'} carried forward` : ''}. Due ${addDays(today(), days)}.` : `Registered against the MDL. Due ${addDays(today(), days)}.`)
+          + (subNote ? `\nNote: ${subNote}` : ''),
+      })],
+    };
+  };
+  const withNewReview = (d, project, note) => (workflowOn(project) ? { ...d, review: newReview(d, project, d.review, note) } : d);
+
+  const startReview = (drawingId) => {
+    const d = drawings.find(x => x.id === drawingId);
+    const p = projectOf(d);
+    if (!d || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return;
+    setDrawings(prev => prev.map(x => (x.id === drawingId ? { ...x, review: newReview(x, p, x.review) } : x)));
+    addLog(`Review started for <strong>${d.code}</strong> ${d.currentVersion}.`);
+  };
+
+  const canAct = (d) => canActOnStage(currentUser, projectOf(d), d?.review?.stage);
+
+  // Steps 3, 4, 7: hand over to the next stage
+  const advanceReview = (drawingId, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    const from = d?.review?.stage;
+    const to = NEXT_STAGE[from];
+    // the stage that issues the CRS goes through issueToConsultant (builds the sheet)
+    if (!d || !to || from === issuingStage(projectOf(d)?.workflow) || !canAct(d)) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, stage: to, history: [...(x.review.history || []), histEntry('advanced', { from, to, note })] },
+    })));
+    addLog(`<strong>${d.code}</strong>: ${stageName(projectOf(d), from)} done → ${stageName(projectOf(d), to)}.`);
+  };
+
+  // Steps 5–6: the approver submits; the CRS is issued in the contractual template
+  const issueToConsultant = async (drawingId, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    const p = projectOf(d);
+    const from = d?.review?.stage;
+    if (!d || from !== issuingStage(p?.workflow) || !canAct(d)) throw new Error('Not allowed at this stage.');
+    // publish TranzEnergy's comments, then build the sheet from what will be visible.
+    // Comments read from an earlier Excel become sheet rows of their own in the new template.
+    const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis, ...rest } = o; return rest; };
+    const asLocal = (c) => (c.local ? pub(c) : { ...pub(c), local: true, id: c.id || uid('crs'), row: undefined, sno: undefined });
+    const pins = (d.pins || []).map(pin => ({ ...pub(pin), comments: (pin.comments || []).map(pub) }));
+    const items = (d.crsImported || []).map(asLocal);
+    const published = { ...d, pins, crsImported: items, crsRowMap: {} };
+    const { bytes, layout, rowMap, fileName } = await buildIssuedCrs(published, p);
+    const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    // a frozen copy of what was sent, and a working copy that keeps syncing
+    const issuedUrl = await uploadCrsFile(d.code, new File([bytes], fileName.replace(/\.xlsx$/, '_issued.xlsx'), { type }));
+    const workUrl = await uploadCrsFile(d.code, new File([bytes], fileName, { type }));
+    const issued = { url: issuedUrl, fileName, at: new Date().toISOString(), by: currentUser?.name, version: d.currentVersion };
+    setDrawings(prev => prev.map(x => {
+      if (x.id !== drawingId) return x;
+      const pinIds = new Set(pins.map(q => q.id)), itemIds = new Set(items.map(q => q.id));
+      if (x.crsData && x.crsData !== workUrl) deleteBlobUrl(x.crsData);
+      return {
+        ...x,
+        // anything added while the sheet was being built is kept (and synced next)
+        pins: [...pins.map(q => { const live = (x.pins || []).find(z => z.id === q.id); return live ? { ...pub(live), comments: (live.comments || []).map(pub) } : q; }),
+               ...(x.pins || []).filter(z => !pinIds.has(z.id))],
+        crsImported: [...items, ...(x.crsImported || []).filter(z => z.local && !itemIds.has(z.id))],
+        crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
+        crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
+        activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
+        review: {
+          ...x.review, stage: 'consultant', issued,
+          history: [...(x.review.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
+        },
+      };
+    }));
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: CRS submitted to ${p?.workflow?.consultantName || 'the consultant'}.`);
+  };
+
+  // Step 8: the client's category (recorded by us — the client doesn't sign in)
+  const recordCategory = (drawingId, category, note = '', decidedOn = today()) => {
+    const d = drawings.find(x => x.id === drawingId);
+    const cat = CATEGORIES.find(c => c.key === category);
+    if (!d || !cat || d.review?.stage !== 'client' || !canAct(d)) return;
+    const to = cat.closes ? 'closed' : 'resubmit';
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: {
+        ...x.review, stage: to, category, decidedOn, closedAt: cat.closes ? today() : null,
+        history: [...(x.review.history || []), histEntry('category', { from: 'client', to, category, note, decidedOn })],
+      },
+    })));
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${cat.label}</strong>.`);
+  };
+  const p0 = (p) => p?.workflow?.clientName || 'Client';
+
+  const setReviewDue = (drawingId, dueDate) => {
+    const d = drawings.find(x => x.id === drawingId);
+    if (!d?.review || !(canDo('manage_projects') || canAct(d))) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, dueDate, history: [...(x.review.history || []), histEntry('due', { note: `Due date set to ${dueDate}` })] },
+    })));
+  };
+
+  // Admin correction: move a review to any stage
+  const setReviewStage = (drawingId, stage, note = '') => {
+    const d = drawings.find(x => x.id === drawingId);
+    if (!d?.review || !canDo('admin') || !STAGE[stage]) return;
+    setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
+      ...x, review: { ...x.review, stage, history: [...(x.review.history || []), histEntry('moved', { from: x.review.stage, to: stage, note: note || 'Stage changed by admin' })] },
+    })));
+    addLog(`<strong>${d.code}</strong>: review moved to ${STAGE[stage].label}.`);
+  };
+
+  const updateWorkflow = (projectId, workflow) => {
+    if (!canDo('manage_projects')) return;
+    setProjects(prev => prev.map(p => (p.id === projectId ? { ...p, workflow: { ...(p.workflow || {}), ...workflow } } : p)));
+    addLog('Review workflow settings updated.');
+  };
 
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
@@ -821,8 +1055,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       uploadRevision, setDrawingStatus, uploadCRS, updateCrsItems, setPinStatus, saveCrsSync, retryCrsSync,
       canDeleteComment, deletePinComment, deletePin, deleteCrsItem, replaceFileUrls,
       saveNow: pushToCloud,
+      allowEmptySave: () => { allowEmptyPush.current = true; },
       // Comments
       addPin, addComment, resolvePin, acceptPin,
+      // Activity tags
+      recordDownload,
+      // Review workflow
+      startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
       // Users
       createUser, updateUser, deleteUser,
       // Disciplines

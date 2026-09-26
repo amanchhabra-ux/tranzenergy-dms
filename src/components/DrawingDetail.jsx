@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef, useEffect } from 'react';
 import { MoveMenu } from './MoveMenu';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
-import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
+import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput, Bell } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
@@ -10,6 +10,10 @@ import { CrsPanel } from './CrsPanel';
 import { ResizeHandle } from './ResizeHandle';
 import { useIsMobile } from '../utils/useIsMobile';
 import { readCrs, downloadCrs } from '../utils/crs';
+import { ReviewBar } from './ReviewBar';
+import { ActivityPanel } from './ActivityPanel';
+import { markSeen, seenAt } from '../utils/activity';
+import { isExternal } from '../utils/workflow';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -25,8 +29,12 @@ const DISCIPLINE_COLORS = {
   'Structural':          '#be185d',
 };
 
-export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved }) {
-  const { drawings, projects, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin } = useContext(AppContext);
+export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved, seenBefore }) {
+  const { drawings, projects, users, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin, recordDownload } = useContext(AppContext);
+  const external = isExternal(currentUser);
+  // internal = TranzEnergy staff; the consultant can comment but not resolve, move or delete drawings
+  const canManage = canDo('upload') && !external;
+  const authorOrg = (c) => { const u = users.find(x => x.id === c.authorId) || users.find(x => x.name === c.author); return isExternal(u) ? 'Consultant' : null; };
 
   const drawing = drawings.find(d => d.id === drawingId);
 
@@ -59,6 +67,21 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
   const isMobile = useIsMobile();
   const activeView = isMobile && activeViewRaw === 'split' ? 'pdf' : activeViewRaw; // phones: one at a time
   const [showMoveMenu, setShowMoveMenu] = useState(false);
+  // Activity: what's new since you last looked. The list marks a drawing seen when you click it
+  // (seenBefore = the time before that click); a drawing shown automatically isn't marked.
+  const [showActivity, setShowActivity] = useState(false);
+  const [prevSeen, setPrevSeen] = useState(null);
+  useEffect(() => {
+    if (!drawingId || !currentUser) return;
+    setPrevSeen(seenBefore || seenAt(currentUser.id, drawingId));
+    setShowActivity(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawingId, currentUser?.id, seenBefore]);
+  const closeActivity = () => {
+    setShowActivity(false);
+    setPrevSeen(new Date().toISOString());
+    markSeen(currentUser?.id, drawingId);
+  };
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
 
@@ -138,6 +161,8 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
     a.href = pdfSrc;
     a.download = `${drawing.code}_${displayVersion?.version || 'R0'}.pdf`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    recordDownload(drawing.id, 'pdf', a.download);
+    if (drawing.crsData || drawing.pins?.length || drawing.crsImported?.length) recordDownload(drawing.id, 'crs', drawing.crsFileName || `${drawing.code}_CRS.xlsx`);
 
     if (!drawing.crsData && (drawing.pins?.length || drawing.crsImported?.length)) {
       setTimeout(() => downloadCrs(drawing, projects.find(p => p.id === drawing.projectId)), 300);
@@ -204,9 +229,21 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
             <button className="btn btn-ghost btn-icon" title="Download PDF (and CRS)" onClick={handleDownload}>
               <Download size={15} />
             </button>
+            {(() => {
+              const fresh = (drawing.activity || []).filter(e => prevSeen && e.at > prevSeen && e.by !== currentUser?.id).length;
+              return (
+                <button className={`btn btn-ghost btn-icon ${showActivity ? 'on' : ''}`} style={{ position: 'relative' }}
+                  title={fresh ? `${fresh} new since you last looked — uploads, downloads, comments` : 'Activity: uploads, downloads, comments'}
+                  onClick={() => (showActivity ? closeActivity() : setShowActivity(true))}>
+                  <Bell size={15} />
+                  {fresh > 0 && <span className="act-count">{fresh}</span>}
+                </button>
+              );
+            })()}
           </div>
+          {showActivity && <ActivityPanel drawing={drawing} since={prevSeen} onClose={closeActivity} />}
 
-          {canDo('upload') && (
+          {canManage && (
             <div className="toolgroup">
               <button className="btn btn-ghost btn-icon" title="Upload CRS Excel" onClick={() => crsInputRef.current?.click()}>
                 <FileSpreadsheet size={15} />
@@ -281,6 +318,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
           )}
         </button>
       </div>
+      <ReviewBar drawing={drawing} />
       <div className="drawing-body">
         {/* Pin mode hint */}
         {pinMode && (
@@ -396,7 +434,8 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>{pin.comments.length} comment{pin.comments.length !== 1 ? 's' : ''}</span>
                     {pin.accepted && <span className="badge badge-success" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Accepted</span>}
                     {pin.resolved && !pin.accepted && <span className="badge badge-muted" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }}>Resolved</span>}
-                    {canDo('upload') && (
+                    {pin.vis === 'internal' && <span className="badge badge-muted" style={{ fontSize: '9px', padding: '2px 6px', marginLeft: '4px' }} title="Not visible to the consultant until the CRS is submitted">Internal</span>}
+                    {canManage && (
                       <button
                         onClick={e => { e.stopPropagation(); resolvePin(drawingId, pin.id); }}
                         style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: pin.resolved || pin.accepted ? 'var(--success)' : 'var(--text-muted)', padding: '2px' }}
@@ -414,7 +453,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
                             deletePin(drawingId, pin.id);
                           }
                         }}
-                        style={{ marginLeft: canDo('upload') ? 0 : 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px' }}
+                        style={{ marginLeft: canManage ? 0 : 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px' }}
                         title="Delete this pin and its comments"
                         onMouseEnter={e => { e.currentTarget.style.color = 'var(--error)'; }}
                         onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
@@ -438,6 +477,8 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <span className="comment-author">{c.author}</span>
                               {c.type === 'client' && <span className="badge badge-warning" style={{ fontSize: '9px', padding: '1px 5px' }}>Client</span>}
+                              {authorOrg(c) && <span className="badge badge-primary" style={{ fontSize: '9px', padding: '1px 5px' }}>{projects.find(p => p.id === drawing.projectId)?.workflow?.consultantName?.replace(/\s*\(.*\)$/, '') || 'Consultant'}</span>}
+                              {c.vis === 'internal' && <span className="badge badge-muted" style={{ fontSize: '9px', padding: '1px 5px' }} title="Not visible to the consultant until the CRS is submitted">Internal</span>}
                               {canDeleteComment(c.author) && (
                                 <button
                                   className="comment-delete"
@@ -456,7 +497,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
                           </div>
                         </div>
                       ))}
-                      {!(pin.resolved || pin.accepted) && (canDo('approve') || canDo('upload')) && (
+                      {!(pin.resolved || pin.accepted) && canManage && (
                         <div style={{ display: 'flex', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
                           {canDo('approve') && (
                             <button className="btn btn-primary btn-sm" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '6px' }} onClick={(e) => { e.stopPropagation(); acceptPin(drawingId, pin.id); }}>
@@ -480,7 +521,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
           {/* Comment input */}
           {activePinId && canDo('upload') && (
             <div className="comment-input-area" style={{ flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', gap: '6px' }}>
+              {!external && <div style={{ display: 'flex', gap: '6px' }}>
                 <select
                   className="form-input"
                   value={commentType}
@@ -490,7 +531,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
                   <option value="internal">Internal</option>
                   <option value="client">Client</option>
                 </select>
-              </div>
+              </div>}
               <div style={{ display: 'flex', gap: '8px' }}>
                 <textarea
                   className="comment-input"
@@ -716,7 +757,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
 
           {/* Form */}
           <div className="form-group">
-            <label className="form-label">Change Summary / Revision Note *</label>
+            <label className="form-label">Change summary / note for the reviewers *</label>
             <textarea
               className="form-input"
               value={summary}

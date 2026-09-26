@@ -173,6 +173,7 @@ export function buildCrsTable(drawing) {
       replyBy: [...new Set(replies.map(r => r.author))].join(', '),
       status: pinStatus(pin),
       source: 'Drawing pin',
+      internal: pin.vis === 'internal' || comments.some(c => c.vis === 'internal'),
     });
     if (first) seen.add(normText(first.text));
   });
@@ -189,6 +190,7 @@ export function buildCrsTable(drawing) {
       reply: c.reply || '', replyBy: c.replyBy || '', status: c.status || 'Open',
       excelRow: c.row, excelSno: c.sno,
       source: c.local ? 'Added in CRS' : 'Uploaded CRS',
+      internal: c.vis === 'internal',
     });
   });
   return out.map((r, i) => ({ ...r, sno: i + 1 }));
@@ -397,4 +399,80 @@ export async function syncCrsExcel(drawing, project) {
   const plan = planCrsWrites(layout, table, rowMap, clearRows);
   const out = await applyCrsCells(bytes, plan.cells);
   return { bytes: out, rowMap: plan.rowMap, layout: plan.layout, created, clearedRows: clearRows };
+}
+
+// ─── Issuing the CRS in the contractual template (workflow step 6) ──────────
+const ISSUE_META = [
+  ['code', /^(drg|dwg|drawing|doc(ument)?)\.?\s*(no|number|#)\.?$/i],
+  ['title', /^(drawing|document|doc)?\s*(title|description|subject)$/i],
+  ['rev', /^(doc(ument)?\s*|drg\s*|dwg\s*)?rev(ision)?\.?\s*(no\.?)?$/i],
+  ['clientName', /^(client|owner|employer|customer)(\s*name)?$/i],
+  ['contractor', /^(epc|contractor|epc contractor|vendor|supplier)(\s*name)?$/i],
+  ['consultant', /^(consultant|engineer|owner'?s engineer|pmc)(\s*name)?$/i],
+  ['project', /^project(\s*name)?$/i],
+  ['date', /^(date|date of issue|issue date|crs date)$/i],
+];
+
+/** Title-block cells to fill in a template: the first empty cell right of each label. */
+function planMetaWrites(rows, values, headerIdx) {
+  const o = rows.geometry?.origin || { r: 0, c: 0 };
+  const cells = [];
+  const done = new Set();
+  const last = Math.min(headerIdx >= 0 ? headerIdx : 25, 25);
+  for (let r = 0; r < last && r < rows.length; r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      const label = clean(row[c]).replace(/[:.\s]+$/, '');
+      if (!label || label.length > 40) continue;
+      const hit = ISSUE_META.find(([k, re]) => !done.has(k) && re.test(label));
+      if (!hit) continue;
+      const [key] = hit;
+      const v = values[key];
+      if (!v) continue;
+      // the value goes in the next cell to the right, only if it's empty
+      for (let cc = c + 1; cc <= c + 4; cc++) {
+        const existing = clean(row[cc]);
+        if (existing) break;               // already filled (or another label) — leave it
+        cells.push({ r: o.r + r, c: o.c + cc, v });
+        done.add(key);
+        break;
+      }
+    }
+  }
+  return cells;
+}
+
+/**
+ * Build the CRS that goes to the consultant: the project's contractual template (if set)
+ * with the title block filled and every comment in its table; otherwise a generated CRS.
+ * Returns { bytes, layout, rowMap, fileName }.
+ */
+export async function buildIssuedCrs(drawing, project) {
+  const wf = project?.workflow || {};
+  const table = buildCrsTable(drawing);
+  const version = drawing.currentVersion || 'R0';
+  const fileName = `${drawing.code}_${version}_CRS.xlsx`;
+  const values = {
+    code: drawing.code, title: drawing.title, rev: version,
+    clientName: drawing.clientName || wf.clientName || project?.client || '',
+    contractor: drawing.contractor || '', consultant: drawing.consultant || wf.consultantName || '',
+    project: project?.name || '', date: new Date().toISOString().slice(0, 10),
+  };
+  if (wf.crsTemplate?.url) {
+    const bytes = await loadBytes(wf.crsTemplate.url);
+    const rows = await loadWorkbookRows(bytes);
+    const parsed = parseCrsRows(rows);
+    if (!parsed.layout) {
+      const e = new Error("The project's CRS template has no comments table (Comment / Reply / Status columns).");
+      e.code = 'NO_TABLE'; throw e;
+    }
+    const meta = planMetaWrites(rows, values, parsed.layout.headerIdx);
+    const plan = planCrsWrites(parsed.layout, table, {}, []);
+    const out = await applyCrsCells(bytes, [...meta, ...plan.cells]);
+    return { bytes: out, layout: plan.layout, rowMap: plan.rowMap, fileName };
+  }
+  const base = new Uint8Array(XLSX.write(crsWorkbook(drawing, project, { emptyTable: true }), { bookType: 'xlsx', type: 'array' }));
+  const plan = planCrsWrites(GENERATED_LAYOUT, table, {}, []);
+  const out = await applyCrsCells(base, plan.cells);
+  return { bytes: out, layout: plan.layout, rowMap: plan.rowMap, fileName };
 }

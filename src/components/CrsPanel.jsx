@@ -29,7 +29,7 @@ const now = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
  *  - "CRS PDF": a signed/scanned CRS uploaded as PDF, if any.
  */
 export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, compact = false }) {
-  const { projects, canDo, currentUser, updateDrawing, addComment, updateCrsItems, setPinStatus, retryCrsSync, canDeleteComment, deletePin, deleteCrsItem } = useContext(AppContext);
+  const { projects, canDo, currentUser, updateDrawing, addComment, updateCrsItems, setPinStatus, retryCrsSync, canDeleteComment, deletePin, deleteCrsItem, recordDownload } = useContext(AppContext);
   const project = projects.find(p => p.id === drawing.projectId);
   const canEdit = canDo('upload');
   const [mode, setMode] = useState('auto');
@@ -144,7 +144,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
         {mode === 'excel' && drawing.crsData && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingRight: 8, fontSize: 11 }}>
             {syncBadge}
-            <a className="btn btn-secondary btn-sm" href={drawing.crsData} download={drawing.crsFileName || `${drawing.code}_CRS.xlsx`} title="Download the CRS Excel with all comments and replies">
+            <a className="btn btn-secondary btn-sm" href={drawing.crsData} download={drawing.crsFileName || `${drawing.code}_CRS.xlsx`} onClick={() => recordDownload(drawing.id, 'crs', drawing.crsFileName)} title="Download the CRS Excel with all comments and replies">
               <Download size={13} /><span>Download</span>
             </a>
           </div>
@@ -153,7 +153,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingRight: 8, fontSize: 11 }}>
             {syncBadge}
             <span style={{ color: 'var(--text-muted)' }}>{rows.length} · {openCount} open</span>
-            <button className="btn btn-secondary btn-sm" disabled={!rows.length} onClick={() => downloadCrs(drawing, project)} title="Download the auto CRS as a new Excel">
+            <button className="btn btn-secondary btn-sm" disabled={!rows.length} onClick={() => { downloadCrs(drawing, project); recordDownload(drawing.id, 'crs'); }} title="Download the auto CRS as a new Excel">
               <Download size={13} />
             </button>
           </div>
@@ -243,6 +243,7 @@ export function CrsPanel({ drawing, activePinId, onSelectPin, onSaveUploaded, co
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                       <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>#{r.sno}</span>
                       {r.pin !== '' && <span style={{ fontSize: 10, color: 'var(--primary-light)' }}>📍 Pin {r.pin}{r.page ? ` · p.${r.page}` : ''}</span>}
+                      {r.internal && <span className="badge badge-muted" style={{ fontSize: 9, padding: '1px 6px' }} title="Not visible to the consultant until the CRS is submitted">Internal</span>}
                       <span style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1, minWidth: 0 }} className="truncate">
                         {[r.commentBy, r.date, r.kind === 'excel' ? 'from Excel' : r.kind === 'local' ? 'added in CRS' : ''].filter(Boolean).join(' · ')}
                       </span>

@@ -7,7 +7,12 @@ import { BulkUploadModal } from './BulkUploadModal';
 import { ResizeHandle } from './ResizeHandle';
 import { useIsMobile } from '../utils/useIsMobile';
 import { classifyDrawing } from '../utils/drawingClassifier';
-import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud } from 'lucide-react';
+import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud, Workflow } from 'lucide-react';
+import { ReviewTracker, StageChip } from './ReviewTracker';
+import { WorkflowSettings } from './WorkflowSettings';
+import { workflowOn, isExternal, dueState } from '../utils/workflow';
+import { ActivityTags } from './ActivityPanel';
+import { unseenActivity, summaryTags, useSeenVersion, markSeen, seenAt } from '../utils/activity';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
@@ -28,7 +33,7 @@ const DISCIPLINE_COLORS = {
   'Other':               '#a1a1aa',
 };
 
-export function ProjectView({ projectId, onBack }) {
+export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
   const { projects, drawings, DISCIPLINES, createDrawing, uploadCRS, canDo, moveDrawingToDiscipline, addDiscipline, currentUser } = useContext(AppContext);
 
   const project = projects.find(p => p.id === projectId);
@@ -36,7 +41,18 @@ export function ProjectView({ projectId, onBack }) {
 
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeDrawingId, setActiveDrawingId] = useState(projectDrawings[0]?.id || null);
+  const [activeDrawingId, setActiveDrawingId] = useState(initialDrawingId || projectDrawings[0]?.id || null);
+  const [showWorkflow, setShowWorkflow] = useState(false);
+  useSeenVersion(); // refresh the activity tags when a drawing is opened
+  const [seenBefore, setSeenBefore] = useState(null); // { id, at } — when you'd last seen the drawing you just opened
+  // Opening a drawing yourself marks its new uploads/comments as seen
+  const openDrawing = (id) => {
+    if (id && currentUser) { setSeenBefore({ id, at: seenAt(currentUser.id, id) }); markSeen(currentUser.id, id); }
+    setActiveDrawingId(id);
+  };
+  // opened from "My reviews": jump to that drawing
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (initialDrawingId) { openDrawing(initialDrawingId); setActiveTab('all'); } }, [initialDrawingId]);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -60,12 +76,13 @@ export function ProjectView({ projectId, onBack }) {
   // Discipline tabs — always include all DISCIPLINES plus MDL
   const disciplineTabs = [
     { key: 'all', label: 'All Drawings' },
+    ...(workflowOn(project) ? [{ key: 'reviews', label: 'Reviews' }] : []),
     ...DISCIPLINES.map(d => ({ key: d, label: d })),
     { key: 'mdl', label: 'MDL' },
   ];
 
   const filteredDrawings = projectDrawings.filter(d => {
-    if (activeTab !== 'all' && activeTab !== 'mdl' && d.discipline !== activeTab) return false;
+    if (activeTab !== 'all' && activeTab !== 'mdl' && activeTab !== 'reviews' && d.discipline !== activeTab) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return d.code.toLowerCase().includes(q) || d.title.toLowerCase().includes(q);
@@ -74,6 +91,7 @@ export function ProjectView({ projectId, onBack }) {
   const tabCount = (key) => {
     if (key === 'all') return projectDrawings.length;
     if (key === 'mdl') return null;
+    if (key === 'reviews') return projectDrawings.filter(d => d.review && d.review.stage !== 'closed').length;
     return projectDrawings.filter(d => d.discipline === key).length;
   };
 
@@ -107,6 +125,11 @@ export function ProjectView({ projectId, onBack }) {
         </div>
         {canDo('upload') && (
           <div style={{ display: 'flex', gap: '8px' }}>
+            {canDo('manage_projects') && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowWorkflow(true)} title="Review workflow settings">
+                <Workflow size={14} /><span>Workflow</span>
+              </button>
+            )}
             <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkModal(true)}>
               <UploadCloud size={14} /><span>Bulk Upload</span>
             </button>
@@ -155,6 +178,8 @@ export function ProjectView({ projectId, onBack }) {
       {/* Main workspace */}
       {activeTab === 'mdl' ? (
         <MDLView projectId={projectId} />
+      ) : activeTab === 'reviews' ? (
+        <ReviewTracker project={project} onOpenDrawing={(id) => { openDrawing(id); setActiveTab('all'); if (isMobile) setShowSidebar(false); }} />
       ) : (
         <div className={`workspace ${showSidebar ? 'list-open' : ''}`}>
           {/* Drawing list sidebar */}
@@ -189,19 +214,24 @@ export function ProjectView({ projectId, onBack }) {
                     key={dwg.id}
                     className={`drawing-item ${activeDrawingId === dwg.id ? 'active' : ''}`}
                     style={{ position: 'relative' }}
-                    onClick={() => { setActiveDrawingId(dwg.id); setMovingDrawingId(null); if (isMobile) setShowSidebar(false); }}
+                    onClick={() => { openDrawing(dwg.id); setMovingDrawingId(null); if (isMobile) setShowSidebar(false); }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="drawing-item-code">{dwg.code}</div>
                       <div className="drawing-item-title truncate">{dwg.title}</div>
                       <div className="drawing-item-meta">
                         <span className="rev-badge">{dwg.currentVersion}</span>
+                        {workflowOn(project) && dwg.review && dwg.review.stage !== 'closed' && (
+                          <StageChip review={dwg.review} project={project} />
+                        )}
+                        {workflowOn(project) && dueState(dwg.review).kind === 'overdue' && <span className="review-due overdue" style={{ padding: '0 5px' }}>!</span>}
                         {activeTab === 'all' && (
                           <span style={{ fontSize: '10px', fontWeight: 600, color: DISCIPLINE_COLORS[dwg.discipline] || 'var(--text-muted)' }}>
                             {dwg.discipline}
                           </span>
                         )}
                       </div>
+                      <ActivityTags tags={summaryTags(unseenActivity(dwg, currentUser))} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                       <div
@@ -211,7 +241,7 @@ export function ProjectView({ projectId, onBack }) {
                           opacity: 0.7
                         }}
                       />
-                      {canDo('upload') && (
+                      {canDo('upload') && !isExternal(currentUser) && (
                         <button
                           className="btn btn-ghost btn-icon"
                           title="Move to category or project"
@@ -256,6 +286,7 @@ export function ProjectView({ projectId, onBack }) {
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(s => !s)}
             onMoved={() => { setActiveDrawingId(null); if (isMobile) setShowSidebar(true); }}
+            seenBefore={seenBefore?.id === activeDrawingId ? seenBefore.at : null}
           />
         </div>
       )}
@@ -271,6 +302,8 @@ export function ProjectView({ projectId, onBack }) {
           uploadCRS={uploadCRS}
         />
       )}
+
+      {showWorkflow && <WorkflowSettings project={project} onClose={() => setShowWorkflow(false)} />}
 
       {/* Bulk upload modal */}
       {showBulkModal && (
@@ -336,6 +369,7 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
     setCrsMsg(`CRS read: ${parsed.comments.length} comment${parsed.comments.length === 1 ? '' : 's'}${filled.length ? ` · filled ${filled.join(', ')}` : ''}`);
   };
   const [code, setCode] = useState('');
+  const [subNote, setSubNote] = useState('');
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [discipline, setDiscipline] = useState('Electrical');
@@ -585,7 +619,8 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
       clientName,
       consultant,
       contractor,
-      changeSummary: 'Initial issue R0.'
+      changeSummary: 'Initial issue R0.',
+      submissionNote: subNote.trim(),
     });
     if (dwg && crsFile) {
       try { uploadCRS(dwg.id, await uploadCrsFile(dwg.code, crsFile), crsParsed || await readCrs(crsFile), crsFile.name); }
@@ -694,6 +729,12 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
               <label className="form-label">Description</label>
               <textarea className="form-input" rows={2} placeholder="Brief description of drawing scope…" value={desc} onChange={e => setDesc(e.target.value)} />
             </div>
+            {workflowOn(project) && (
+              <div className="form-group mt-2" style={{ marginBottom: 0 }}>
+                <label className="form-label">Note for the reviewers</label>
+                <textarea className="form-input" rows={2} placeholder="e.g. First submission — please check the earthing and CT details" value={subNote} onChange={e => setSubNote(e.target.value)} />
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">

@@ -3,7 +3,8 @@ import { AppContext } from '../AppContext';
 import { ChangePassword } from './ChangePassword';
 import {
   LayoutDashboard, Zap, FolderOpen, Radio, Wind,
-  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database, KeyRound } from 'lucide-react';
+  Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database, KeyRound, Inbox } from 'lucide-react';
+import { isExternal } from '../utils/workflow';
 
 const TYPE_META = {
   transmission: { label: 'Transmission', icon: Zap,     color: '#2a4439' },
@@ -12,7 +13,7 @@ const TYPE_META = {
   wind:         { label: 'Wind',          icon: Wind,    color: '#0369a1' },
 };
 
-export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = false }) {
+export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = false, reviewCount = { total: 0, overdue: 0 } }) {
   const { currentUser, projects, drawings, canDo, logout, authMode } = useContext(AppContext);
   const [showPw, setShowPw] = React.useState(false);
 
@@ -41,6 +42,19 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
           <LayoutDashboard size={16} />
           <span>Dashboard</span>
         </div>
+        {(
+          <div
+            className={`sidebar-item ${activeView === 'myreviews' ? 'active' : ''}`}
+            onClick={() => onNavigate('myreviews')}
+            title="Drawings waiting on you, and what others uploaded, downloaded and commented"
+          >
+            <Inbox size={16} />
+            <span style={{ flex: 1 }}>My reviews</span>
+            {reviewCount.total > 0 && (
+              <span className={`sidebar-item-count review-count ${reviewCount.overdue ? 'overdue' : ''}`} title={reviewCount.overdue ? `${reviewCount.overdue} overdue` : ''}>{reviewCount.total}</span>
+            )}
+          </div>
+        )}
 
         {/* Projects */}
         <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Projects</div>
@@ -63,7 +77,8 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
           );
         })}
 
-        {/* Settings & Sync */}
+        {/* Settings & Sync (TranzEnergy staff only) */}
+        {!isExternal(currentUser) && (<>
         <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Settings</div>
         <div
           className={`sidebar-item ${activeView === 'backup' ? 'active' : ''}`}
@@ -72,6 +87,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
           <Database size={15} />
           <span>Backup & Sync</span>
         </div>
+        </>)}
 
         {/* Admin */}
         {canDo('admin') && (
