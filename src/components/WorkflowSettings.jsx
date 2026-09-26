@@ -41,7 +41,9 @@ export function WorkflowSettings({ project, onClose }) {
 
   const save = () => {
     const turnaroundDays = Math.max(1, parseInt(wf.turnaroundDays, 10) || 14);
-    updateWorkflow(project.id, { ...wf, turnaroundDays });
+    const issueNotation = String(wf.issueNotation || '').trim();
+    const categoryFormat = String(wf.categoryFormat || '').trim();
+    updateWorkflow(project.id, { ...wf, turnaroundDays, issueNotation, categoryFormat });
     // everyone in the workflow needs access to the project
     const people = new Set([...(project.assignedUsers || []), ...ROLE_ROWS.flatMap(r => wf[r.key] || [])]);
     if (people.size !== (project.assignedUsers || []).length) updateProject(project.id, { assignedUsers: [...people] });
@@ -101,6 +103,16 @@ export function WorkflowSettings({ project, onClose }) {
               <label className="form-label">Turnaround (calendar days)</label>
               <input type="number" min={1} className="form-input" value={wf.turnaroundDays} onChange={e => set('turnaroundDays', e.target.value)} />
               <div className="wf-hint">As agreed in the contract. Each due date can also be edited.</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Reviewer on the issued CRS</label>
+              <input className="form-input" value={wf.issueNotation || ''} onChange={e => set('issueNotation', e.target.value)} placeholder="e.g. AEL" />
+              <div className="wf-hint">Written in the Reviewer/s column of every row of the issued sheet. Empty: each commenter's name.</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Category format</label>
+              <input className="form-input" value={wf.categoryFormat || ''} onChange={e => set('categoryFormat', e.target.value)} placeholder="Category {key}" />
+              <div className="wf-hint">How a category is written on the sheet and in the MDL; {'{key}'} becomes 1, 2, 3, 4B… e.g. Category-{'{key}'}</div>
             </div>
           </div>
 
