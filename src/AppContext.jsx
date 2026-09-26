@@ -26,7 +26,8 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
 // Per-drawing activity trail: file uploaded / downloaded, comment added / closed (newest last)
-const ACTIVITY_CAP = 150;
+// The server stamps each new entry's time; cap as on the server (api/_lib/view.js ACTIVITY_CAP)
+const ACTIVITY_CAP = 5000;
 const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), entry].slice(-ACTIVITY_CAP) });
 const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
 const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
@@ -326,8 +327,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       id: uid('log'),
       message,
       author: authorName || currentUser?.name || 'System',
-      time: new Date().toISOString()
-    }, ...prev].slice(0, 200));
+      authorId: currentUser?.id || null,
+      time: new Date().toISOString() // the server stamps its own time on save
+    }, ...prev].slice(0, 5000)); // same cap as mergeState.js and the server (api/_lib/view.js LOG_CAP)
   }, [currentUser]);
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
@@ -635,15 +637,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     return canDo('upload') && !!author && author.replace(/ \(Client\)$/, '') === currentUser.name;
   }, [currentUser, canDo]);
 
+  // An outside consultant's save names what they deleted: the server removes their own
+  // comments only when named here, never because a (stale) tab lacks them.
+  const markDeleted = (d, ...ids) => (isExternal(currentUser)
+    ? { ...d, deletedIds: [...new Set([...(d.deletedIds || []), ...ids.filter(Boolean)])] } : d);
+
   // Rows in the CRS Excel that held a deleted comment get blanked on the next sync
   const withClearedRow = (d, row) => (row === undefined || row === null ? d : { ...d, crsClearRows: [...new Set([...(d.crsClearRows || []), row])] });
 
   // One reply/comment inside a pin's thread
   const deletePinComment = (drawingId, pinId, commentId) => {
-    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs({
+    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs(markDeleted({
       ...d,
       pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, comments: (p.comments || []).filter(c => c.id !== commentId) }),
-    })));
+    }, commentId))));
     addLog('Comment deleted.');
   };
 
@@ -653,7 +660,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       if (d.id !== drawingId) return d;
       const key = `pin:${pinId}`;
       const { [key]: row, ...restMap } = d.crsRowMap || {};
-      return bumpCrs(withClearedRow({ ...d, pins: (d.pins || []).filter(p => p.id !== pinId), crsRowMap: restMap }, row));
+      return bumpCrs(markDeleted(withClearedRow({ ...d, pins: (d.pins || []).filter(p => p.id !== pinId), crsRowMap: restMap }, row), pinId));
     }));
     addLog('Comment pin deleted.');
   };
@@ -672,7 +679,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       } else {
         next = withClearedRow(next, item.row);
       }
-      return bumpCrs(next, true);
+      return bumpCrs(markDeleted(next, item.id), true);
     }));
     addLog('CRS comment deleted.');
   };

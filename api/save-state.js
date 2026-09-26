@@ -3,7 +3,7 @@ import path from 'node:path';
 import { putText, PreconditionFailed, strongEtag } from './_lib/r2.js';
 import { requireUser } from './_lib/auth.js';
 import { forgetMembers, readState, localEtag, STATE_KEY } from './_lib/state.js';
-import { isExternal, mergeExternal } from './_lib/view.js';
+import { isExternal, mergeExternal, stampNewEntries } from './_lib/view.js';
 import { checkSave } from './_lib/authz.js';
 import { reviewEvents, sendReviewEmails } from './_lib/notify.js';
 
@@ -49,6 +49,7 @@ export default async function handler(req, res) {
       // internal roles: users, org and review workflow change only when an admin saves
       const refused = checkSave(before, state, who);
       if (refused) return res.status(refused.status).json({ error: refused.error });
+      next = stampNewEntries(before, state);
     }
 
     let newEtag = null;
