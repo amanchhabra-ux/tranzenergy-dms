@@ -42,11 +42,11 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
           <LayoutDashboard size={16} />
           <span>Dashboard</span>
         </div>
-        {projects.some(p => p.workflow?.enabled) && (
+        {(
           <div
             className={`sidebar-item ${activeView === 'myreviews' ? 'active' : ''}`}
             onClick={() => onNavigate('myreviews')}
-            title="Drawings waiting on you"
+            title="Drawings waiting on you, and what others uploaded, downloaded and commented"
           >
             <Inbox size={16} />
             <span style={{ flex: 1 }}>My reviews</span>

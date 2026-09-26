@@ -2,7 +2,7 @@ import React, { useContext, useState, useRef, useEffect } from 'react';
 import { MoveMenu } from './MoveMenu';
 import { AppContext } from '../AppContext';
 import { PdfViewer } from './PdfViewer';
-import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput } from 'lucide-react';
+import { Maximize2, Minimize2, Upload, Download, ChevronLeft, ChevronRight, CheckCircle, Clock, AlertCircle, MessageSquare, X, Send, CheckCheck, FileUp, Trash2, PanelLeft, FileSpreadsheet, FolderInput, Bell } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
@@ -11,6 +11,8 @@ import { ResizeHandle } from './ResizeHandle';
 import { useIsMobile } from '../utils/useIsMobile';
 import { readCrs, downloadCrs } from '../utils/crs';
 import { ReviewBar } from './ReviewBar';
+import { ActivityPanel } from './ActivityPanel';
+import { markSeen, seenAt } from '../utils/activity';
 import { isExternal } from '../utils/workflow';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -27,8 +29,8 @@ const DISCIPLINE_COLORS = {
   'Structural':          '#be185d',
 };
 
-export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved }) {
-  const { drawings, projects, users, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin } = useContext(AppContext);
+export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved, seenBefore }) {
+  const { drawings, projects, users, currentUser, canDo, uploadRevision, deleteDrawing, addPin, addComment, resolvePin, acceptPin, uploadCRS, DISCIPLINES, moveDrawingToDiscipline, canDeleteComment, deletePinComment, deletePin, recordDownload } = useContext(AppContext);
   const external = isExternal(currentUser);
   // internal = TranzEnergy staff; the consultant can comment but not resolve, move or delete drawings
   const canManage = canDo('upload') && !external;
@@ -65,6 +67,21 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
   const isMobile = useIsMobile();
   const activeView = isMobile && activeViewRaw === 'split' ? 'pdf' : activeViewRaw; // phones: one at a time
   const [showMoveMenu, setShowMoveMenu] = useState(false);
+  // Activity: what's new since you last looked. The list marks a drawing seen when you click it
+  // (seenBefore = the time before that click); a drawing shown automatically isn't marked.
+  const [showActivity, setShowActivity] = useState(false);
+  const [prevSeen, setPrevSeen] = useState(null);
+  useEffect(() => {
+    if (!drawingId || !currentUser) return;
+    setPrevSeen(seenBefore || seenAt(currentUser.id, drawingId));
+    setShowActivity(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawingId, currentUser?.id, seenBefore]);
+  const closeActivity = () => {
+    setShowActivity(false);
+    setPrevSeen(new Date().toISOString());
+    markSeen(currentUser?.id, drawingId);
+  };
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
 
@@ -144,6 +161,8 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
     a.href = pdfSrc;
     a.download = `${drawing.code}_${displayVersion?.version || 'R0'}.pdf`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    recordDownload(drawing.id, 'pdf', a.download);
+    if (drawing.crsData || drawing.pins?.length || drawing.crsImported?.length) recordDownload(drawing.id, 'crs', drawing.crsFileName || `${drawing.code}_CRS.xlsx`);
 
     if (!drawing.crsData && (drawing.pins?.length || drawing.crsImported?.length)) {
       setTimeout(() => downloadCrs(drawing, projects.find(p => p.id === drawing.projectId)), 300);
@@ -210,7 +229,19 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
             <button className="btn btn-ghost btn-icon" title="Download PDF (and CRS)" onClick={handleDownload}>
               <Download size={15} />
             </button>
+            {(() => {
+              const fresh = (drawing.activity || []).filter(e => prevSeen && e.at > prevSeen && e.by !== currentUser?.id).length;
+              return (
+                <button className={`btn btn-ghost btn-icon ${showActivity ? 'on' : ''}`} style={{ position: 'relative' }}
+                  title={fresh ? `${fresh} new since you last looked — uploads, downloads, comments` : 'Activity: uploads, downloads, comments'}
+                  onClick={() => (showActivity ? closeActivity() : setShowActivity(true))}>
+                  <Bell size={15} />
+                  {fresh > 0 && <span className="act-count">{fresh}</span>}
+                </button>
+              );
+            })()}
           </div>
+          {showActivity && <ActivityPanel drawing={drawing} since={prevSeen} onClose={closeActivity} />}
 
           {canManage && (
             <div className="toolgroup">

@@ -25,6 +25,11 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 // `force` also creates an Excel when the drawing has none yet (changes made in the CRS panel).
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
+// Per-drawing activity trail: file uploaded / downloaded, comment added / closed (newest last)
+const ACTIVITY_CAP = 150;
+const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), entry].slice(-ACTIVITY_CAP) });
+const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
+const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
 
 // Avatar colours from older palettes → Tranz Energy green palette
 const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#5a9a44': '#2f6a2f', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b',
@@ -395,6 +400,22 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     return t;
   }, [currentUser]);
 
+  // One activity entry by the signed-in person. `internal` hides it from the consultant.
+  const ev = useCallback((type, extra = {}) => ({
+    id: uid('act'), type, at: new Date().toISOString(), by: currentUser?.id || null, byName: currentUser?.name || 'Someone', ...extra,
+  }), [currentUser]);
+
+  const pinEvent = (pin, type, status) => ev(type, {
+    pin: pin.label, status, text: snippet(pin.comments?.[0]?.text),
+    ...(pin.vis === 'internal' ? { vis: 'internal' } : {}),
+  });
+
+  // Downloads are recorded for everyone who can see the drawing (viewers too)
+  const recordDownload = useCallback((drawingId, what, fileName) => {
+    if (!currentUser) return;
+    setDrawings(prev => prev.map(d => (d.id !== drawingId ? d : withActivity(d, ev('download', { what, fileName: fileName || null, version: d.currentVersion })))));
+  }, [currentUser, ev]);
+
   // ─── Projects ──────────────────────────────────────────────────────────────
   const createProject = (data) => {
     if (!canDo('manage_projects')) return;
@@ -464,7 +485,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       pins: []
     };
     const proj = projects.find(p => p.id === dwg.projectId);
-    const started = withNewReview(dwg, proj);
+    const started = withNewReview(withActivity(dwg, ev('upload', { what: 'drawing', version: startVer })), proj);
     setDrawings(prev => [started, ...prev]);
     addLog(`Drawing <strong>${dwg.code}</strong> registered by <strong>${currentUser?.name}</strong>.`);
     return started;
@@ -532,12 +553,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         // a signed/scanned CRS in PDF form: keep it for viewing, the Excel CRS stays as is
         if (d.crsPdf && d.crsPdf !== crsData) deleteBlobUrl(d.crsPdf);
         addLog(`CRS (PDF) uploaded for <strong>${d.code}</strong>.`);
-        return { ...d, crsPdf: crsData };
+        return withActivity({ ...d, crsPdf: crsData }, ev('upload', { what: 'crs-pdf', fileName: fileName || null, version: d.currentVersion }));
       }
       if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData); // replaced file
       addLog(`CRS uploaded for <strong>${d.code}</strong>.`);
-      if (!parsed) return { ...d, crsData };
-      return {
+      const upEv = ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion });
+      if (!parsed) return withActivity({ ...d, crsData }, upEv);
+      return withActivity({
         ...d,
         ...crsFieldUpdates(d, parsed.meta || {}),
         crsData,
@@ -548,7 +570,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsRowMap: pinRowMapFromImport(d, parsed.comments || []),
         crsFileName: fileName || d.crsFileName || null,
         crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
-      };
+      }, upEv);
     }));
   };
 
@@ -557,19 +579,37 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
-      const before = new Set((d.crsImported || []).map(c => c.id).filter(Boolean));
-      const items = updater(d.crsImported || []).map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
-      return bumpCrs({ ...d, crsImported: items }, true);
+      const old = d.crsImported || [];
+      const before = new Set(old.map(c => c.id).filter(Boolean));
+      const items = updater(old).map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
+      // what changed → activity
+      let next = { ...d, crsImported: items };
+      items.forEach((c, i) => {
+        const prevItem = c.id ? old.find(o => o.id === c.id) : old[i];
+        const internal = c.vis === 'internal' ? { vis: 'internal' } : {};
+        if (!prevItem) { next = withActivity(next, ev('comment', { text: snippet(c.comment), ...internal })); return; }
+        if (String(c.reply || '') !== String(prevItem.reply || '') && String(c.reply || '').length > String(prevItem.reply || '').length) {
+          next = withActivity(next, ev('comment', { reply: true, text: snippet(String(c.reply).split('\n').pop()), on: snippet(c.comment), ...internal }));
+        }
+        if (isClosedStatus(c.status) !== isClosedStatus(prevItem.status)) {
+          next = withActivity(next, ev(isClosedStatus(c.status) ? 'closed' : 'reopened', { status: c.status, text: snippet(c.comment), ...internal }));
+        }
+      });
+      return bumpCrs(next, true);
     }));
   };
 
   // Set a pin's status from the CRS: 'Open' | 'Resolved' | 'Accepted'
   const setPinStatus = (drawingId, pinId, status) => {
     if (!canDo(status === 'Accepted' ? 'approve' : 'upload')) return;
-    setDrawings(prev => prev.map(d => d.id !== drawingId ? d : bumpCrs({
-      ...d,
-      pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }),
-    }, true)));
+    setDrawings(prev => prev.map(d => {
+      if (d.id !== drawingId) return d;
+      const pin = (d.pins || []).find(p => p.id === pinId);
+      const wasClosed = !!(pin?.resolved || pin?.accepted);
+      let next = { ...d, pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }) };
+      if (pin && wasClosed !== (status !== 'Open')) next = withActivity(next, pinEvent(pin, status !== 'Open' ? 'closed' : 'reopened', status));
+      return bumpCrs(next, true);
+    }));
   };
 
   // ─── Storage migration: swap old file links for new ones (e.g. Vercel Blob → R2) ──
@@ -723,13 +763,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         versions: [rev, ...(dwg.versions || [])]
       };
       // a new revision restarts the review at step 1 (comments carried forward)
-      return withNewReview(next, projects.find(p => p.id === dwg.projectId));
+      return withNewReview(withActivity(next, ev('upload', { what: 'revision', version: nextVer, note: snippet(changeSummary) })), projects.find(p => p.id === dwg.projectId));
     }));
 
     if (logMsg) addLog(logMsg);
     return nextVer;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, addLog, canDo, projects]);
+  }, [currentUser, addLog, canDo, projects, ev]);
 
   // ─── Drawing Status ────────────────────────────────────────────────────────
   const setDrawingStatus = (id, status) => {
@@ -757,7 +797,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({
+      const updated = bumpCrs({
         ...dwg,
         pins: (dwg.pins || []).map(pin => {
           if (pin.id !== pinId) return pin;
@@ -773,24 +813,35 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
           return { ...pin, comments: [...pin.comments, comment] };
         })
       });
+      const pin = (dwg.pins || []).find(p => p.id === pinId);
+      return withActivity(updated, ev('comment', {
+        pin: pin?.label, reply: (pin?.comments || []).length > 0, text: snippet(text),
+        ...(tagNew(dwg).vis ? { vis: 'internal' } : {}),
+      }));
     }));
-  }, [currentUser, canDo, tagNew]);
+  }, [currentUser, canDo, tagNew, ev]);
 
   const resolvePin = useCallback((drawingId, pinId) => {
     if (!canDo('upload')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) });
+      const pin = dwg.pins.find(p => p.id === pinId);
+      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) };
+      return bumpCrs(pin ? withActivity(next, pinEvent(pin, pin.resolved ? 'reopened' : 'closed', pin.resolved ? 'Open' : 'Resolved')) : next);
     }));
-  }, [canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDo, ev]);
 
   const acceptPin = useCallback((drawingId, pinId) => {
     if (!canDo('approve')) return;
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) });
+      const pin = dwg.pins.find(p => p.id === pinId);
+      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) };
+      return bumpCrs(pin && !pin.accepted && !pin.resolved ? withActivity(next, pinEvent(pin, 'closed', 'Accepted')) : next);
     }));
-  }, [canDo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDo, ev]);
 
 
   // ─── Review workflow ───────────────────────────────────────────────────────
@@ -872,6 +923,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsImported: [...items, ...(x.crsImported || []).filter(z => z.local && !itemIds.has(z.id))],
         crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
         crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
+        activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
         review: {
           ...x.review, stage: 'consultant', issued,
           history: [...(x.review.history || []), histEntry('issued', { from: 'approval', to: 'consultant', note, crs: issued })],
@@ -1000,6 +1052,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       allowEmptySave: () => { allowEmptyPush.current = true; },
       // Comments
       addPin, addComment, resolvePin, acceptPin,
+      // Activity tags
+      recordDownload,
       // Review workflow
       startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
       // Users

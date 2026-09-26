@@ -17,6 +17,7 @@ function drawingForExternal(d) {
     ...d,
     pins: (d.pins || []).filter(p => !hidden(p)).map(p => ({ ...p, comments: (p.comments || []).filter(c => !hidden(c)) })),
     crsImported: (d.crsImported || []).filter(c => !hidden(c)),
+    activity: (d.activity || []).filter(e => !hidden(e)),
   };
   if (d.review && PRE_ISSUE.has(d.review.stage)) {
     // the working CRS Excel may already hold internal comments — show only what was issued
@@ -108,6 +109,10 @@ function mergeDrawing(sd, inc, user, project) {
   });
   out.crsImported = unionAdd(sd.crsImported, (inc.crsImported || []).filter(c => c.local), (s, i) => mine(s) && mine(i));
   out.review = mergeReview(sd, inc, user, project);
+  // their own new activity entries (uploads, downloads, comments)
+  const seen = new Set((sd.activity || []).map(e => e.id));
+  const mineNew = (inc.activity || []).filter(e => e?.id && !seen.has(e.id) && e.by === user.id && !e.vis);
+  if (mineNew.length) out.activity = [...(sd.activity || []), ...mineNew].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-150);
   out.crsRev = Math.max(sd.crsRev || 0, inc.crsRev || 0); // internal users' browsers rewrite the Excel
   return out;
 }

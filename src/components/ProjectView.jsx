@@ -11,6 +11,8 @@ import { Plus, Search, Upload, X, FileCheck2, FolderInput, UploadCloud, Workflow
 import { ReviewTracker, StageChip } from './ReviewTracker';
 import { WorkflowSettings } from './WorkflowSettings';
 import { workflowOn, isExternal, dueState } from '../utils/workflow';
+import { ActivityTags } from './ActivityPanel';
+import { unseenActivity, summaryTags, useSeenVersion, markSeen, seenAt } from '../utils/activity';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
@@ -41,8 +43,16 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeDrawingId, setActiveDrawingId] = useState(initialDrawingId || projectDrawings[0]?.id || null);
   const [showWorkflow, setShowWorkflow] = useState(false);
+  useSeenVersion(); // refresh the activity tags when a drawing is opened
+  const [seenBefore, setSeenBefore] = useState(null); // { id, at } — when you'd last seen the drawing you just opened
+  // Opening a drawing yourself marks its new uploads/comments as seen
+  const openDrawing = (id) => {
+    if (id && currentUser) { setSeenBefore({ id, at: seenAt(currentUser.id, id) }); markSeen(currentUser.id, id); }
+    setActiveDrawingId(id);
+  };
   // opened from "My reviews": jump to that drawing
-  React.useEffect(() => { if (initialDrawingId) { setActiveDrawingId(initialDrawingId); setActiveTab('all'); } }, [initialDrawingId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (initialDrawingId) { openDrawing(initialDrawingId); setActiveTab('all'); } }, [initialDrawingId]);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -169,7 +179,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
       {activeTab === 'mdl' ? (
         <MDLView projectId={projectId} />
       ) : activeTab === 'reviews' ? (
-        <ReviewTracker project={project} onOpenDrawing={(id) => { setActiveDrawingId(id); setActiveTab('all'); if (isMobile) setShowSidebar(false); }} />
+        <ReviewTracker project={project} onOpenDrawing={(id) => { openDrawing(id); setActiveTab('all'); if (isMobile) setShowSidebar(false); }} />
       ) : (
         <div className={`workspace ${showSidebar ? 'list-open' : ''}`}>
           {/* Drawing list sidebar */}
@@ -204,7 +214,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
                     key={dwg.id}
                     className={`drawing-item ${activeDrawingId === dwg.id ? 'active' : ''}`}
                     style={{ position: 'relative' }}
-                    onClick={() => { setActiveDrawingId(dwg.id); setMovingDrawingId(null); if (isMobile) setShowSidebar(false); }}
+                    onClick={() => { openDrawing(dwg.id); setMovingDrawingId(null); if (isMobile) setShowSidebar(false); }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="drawing-item-code">{dwg.code}</div>
@@ -221,6 +231,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
                           </span>
                         )}
                       </div>
+                      <ActivityTags tags={summaryTags(unseenActivity(dwg, currentUser))} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                       <div
@@ -275,6 +286,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(s => !s)}
             onMoved={() => { setActiveDrawingId(null); if (isMobile) setShowSidebar(true); }}
+            seenBefore={seenBefore?.id === activeDrawingId ? seenBefore.at : null}
           />
         </div>
       )}

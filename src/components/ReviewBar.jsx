@@ -29,7 +29,7 @@ function stepList(wf) {
 
 export function ReviewBar({ drawing }) {
   const ctx = useContext(AppContext);
-  const { projects, users, currentUser, canDo, startReview } = ctx;
+  const { projects, users, currentUser, canDo, startReview, recordDownload } = ctx;
   const project = projects.find(p => p.id === drawing.projectId);
   const [modal, setModal] = useState(null); // 'advance' | 'issue' | 'category' | 'history' | 'due' | 'stage'
   if (!workflowOn(project)) return null;
@@ -96,7 +96,7 @@ export function ReviewBar({ drawing }) {
           </button>
         )}
         {r.issued?.url && (
-          <a className="review-link" href={dlHref(r.issued.url)} download={r.issued.fileName} title={`CRS issued ${r.issued.at?.slice(0, 10)} by ${r.issued.by}`}>
+          <a className="review-link" href={dlHref(r.issued.url)} download={r.issued.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', r.issued.fileName)} title={`CRS issued ${r.issued.at?.slice(0, 10)} by ${r.issued.by}`}>
             <Download size={12} /> Issued CRS
           </a>
         )}
@@ -298,6 +298,7 @@ const ACTION_TEXT = {
 };
 
 function HistoryModal({ drawing, project, onClose, onChangeStage }) {
+  const { recordDownload } = useContext(AppContext);
   const r = drawing.review;
   const items = [...(r.history || [])].reverse();
   return (
@@ -311,7 +312,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
           {r.cycles.map(c => (
             <div key={c.cycle} className="review-cycle-row">
               <strong>{c.version}</strong> · cycle {c.cycle} · {c.category ? `Category ${c.category}` : (STAGE[c.stage]?.label || c.stage)}
-              {c.issued?.url && <a href={dlHref(c.issued.url)} download={c.issued.fileName} className="review-link"><Download size={12} /> CRS as issued</a>}
+              {c.issued?.url && <a href={dlHref(c.issued.url)} download={c.issued.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', c.issued.fileName)} className="review-link"><Download size={12} /> CRS as issued</a>}
             </div>
           ))}
         </div>
@@ -326,7 +327,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
                 {h.category && <span> — <strong>Category {h.category}</strong>{h.decidedOn ? ` on ${h.decidedOn}` : ''}</span>}
               </div>
               {h.note && <div className="review-history-note">{h.note}</div>}
-              {h.crs?.url && <a href={dlHref(h.crs.url)} download={h.crs.fileName} className="review-link"><Download size={12} /> {h.crs.fileName}</a>}
+              {h.crs?.url && <a href={dlHref(h.crs.url)} download={h.crs.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', h.crs.fileName)} className="review-link"><Download size={12} /> {h.crs.fileName}</a>}
             </div>
           </div>
         ))}

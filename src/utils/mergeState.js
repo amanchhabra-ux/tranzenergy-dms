@@ -49,7 +49,7 @@ function mergeList(base = [], local = [], remote = []) {
 function mergeDrawing(b, l, r) {
   const out = { ...r };
   for (const k of new Set([...Object.keys(l), ...Object.keys(b)])) {
-    if (['pins', 'crsImported', 'review'].includes(k)) continue;
+    if (['pins', 'crsImported', 'review', 'activity'].includes(k)) continue;
     if (!same(b[k], l[k])) out[k] = l[k];
   }
   out.pins = mergeById(b.pins || [], l.pins || [], r.pins || [], (bp, lp, rp) => {
@@ -62,6 +62,12 @@ function mergeDrawing(b, l, r) {
   // rows without ids (read from an Excel) follow whoever changed them
   const noId = (x) => (x.crsImported || []).filter(c => !c.id);
   out.crsImported = [...(same(noId(b), noId(l)) ? noId(r) : noId(l)), ...out.crsImported];
+  // activity trail: everyone's entries, in time order
+  if (!same(b.activity, l.activity) || !same(b.activity, r.activity)) {
+    const all = new Map();
+    [...(r.activity || []), ...(l.activity || [])].forEach(e => e?.id && all.set(e.id, e));
+    out.activity = [...all.values()].sort((x, y) => String(x.at).localeCompare(String(y.at))).slice(-150);
+  }
   if (!same(b.review, l.review)) {
     if (!r.review || same(b.review, r.review)) out.review = l.review;
     else {

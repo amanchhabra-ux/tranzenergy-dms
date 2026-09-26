@@ -1,6 +1,7 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { PlayCircle, AlertTriangle, Inbox, ChevronRight } from 'lucide-react';
+import { TAG, describe } from '../utils/activity';
 import {
   STAGE, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
 } from '../utils/workflow';
@@ -117,11 +118,18 @@ export function MyReviews({ onOpenDrawing }) {
   const ids = new Set(visibleProjects.map(p => p.id));
   const mine = waitingOn(currentUser, visibleProjects, drawings.filter(d => ids.has(d.projectId)));
   const since = Date.now() - 14 * 86400000;
-  const updates = drawings.filter(d => ids.has(d.projectId) && d.review)
-    .flatMap(d => (d.review.history || []).map(h => ({ h, d, p: visibleProjects.find(p => p.id === d.projectId) })))
+  // review steps + file / comment activity by other people, newest first
+  const updates = drawings.filter(d => ids.has(d.projectId))
+    .flatMap(d => {
+      const p = visibleProjects.find(x => x.id === d.projectId);
+      return [
+        ...(d.review?.history || []).map(h => ({ kind: 'review', h, d, p })),
+        ...(d.activity || []).map(h => ({ kind: 'activity', h, d, p })),
+      ];
+    })
     .filter(x => new Date(x.h.at) > since && x.h.by !== currentUser?.id)
     .sort((a, b) => String(b.h.at).localeCompare(String(a.h.at)))
-    .slice(0, 30);
+    .slice(0, 40);
 
   return (
     <div className="theme-light" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
@@ -154,11 +162,21 @@ export function MyReviews({ onOpenDrawing }) {
         )}
 
         <div className="myreviews-head">Recent activity</div>
-        {updates.length === 0 ? <div className="tracker-sub" style={{ padding: '4px 2px' }}>No review activity in the last two weeks.</div> : (
+        {updates.length === 0 ? <div className="tracker-sub" style={{ padding: '4px 2px' }}>Nothing new from others in the last two weeks.</div> : (
           <div className="myreviews-updates">
-            {updates.map(({ h, d, p }) => (
+            {updates.map(({ kind, h, d, p }) => kind === 'activity' ? (
               <button key={h.id} className="myreviews-update" onClick={() => onOpenDrawing(p.id, d.id)}>
                 <span className="tracker-sub" style={{ width: 80, flexShrink: 0 }}>{WHEN(h.at)}</span>
+                <span className={`act-tag ${TAG[h.type]?.cls || ''}`}>{TAG[h.type]?.label || h.type}</span>
+                <span style={{ flex: 1, minWidth: 0 }} className="truncate">
+                  <strong>{d.code}</strong> — {describe(h)}
+                  <span className="tracker-sub"> · {h.byName}</span>
+                </span>
+              </button>
+            ) : (
+              <button key={h.id} className="myreviews-update" onClick={() => onOpenDrawing(p.id, d.id)}>
+                <span className="tracker-sub" style={{ width: 80, flexShrink: 0 }}>{WHEN(h.at)}</span>
+                <span className="act-tag review">Review</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <strong>{d.code}</strong> {d.currentVersion} — {EVENT_TEXT[h.action] || h.action}
                   {h.to && h.action !== 'category' ? ` → ${STAGE[h.to]?.label}` : ''}{h.category ? ` · Category ${h.category}` : ''}
