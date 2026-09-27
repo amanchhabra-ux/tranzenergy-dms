@@ -51,6 +51,9 @@ export default async function handler(req, res) {
       if (refused) return res.status(refused.status).json({ error: refused.error });
       next = stampNewEntries(before, state);
     }
+    // a browser still running an older version of the app does not send the organisation
+    // settings; keep the saved ones rather than wiping them
+    if (before?.org && !('org' in next)) next = { ...next, org: before.org };
 
     let newEtag = null;
     if (local) {

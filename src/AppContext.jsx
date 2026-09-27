@@ -3,6 +3,9 @@ import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
 import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
+import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
+import { nextRevision } from './utils/mdl';
+import { applyPlan } from './utils/mdlImport';
 
 export const AppContext = createContext(null);
 
@@ -32,9 +35,9 @@ const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), en
 const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
 const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
 
-// Avatar colours from older palettes → Tranz Energy green palette
+// Avatar colours from older palettes → the current palette
 const OLD_AVATAR = { '#6366f1': '#3f7d3a', '#06b6d4': '#2a4439', '#10b981': '#15803d', '#f59e0b': '#d97706', '#94a3b8': '#a1a1aa', '#8b5cf6': '#7c3aed', '#ec4899': '#be185d', '#14b8a6': '#0f766e', '#5a9a44': '#2f6a2f', '#0ea5e9': '#0369a1', '#a78bfa': '#52525b',
-  // charcoal + orange → Tranz Energy green
+  // charcoal + orange → green
   '#ea580c': '#3f7d3a', '#c2410c': '#2f6a2f', '#27272a': '#2a4439', '#18181b': '#1f2d27', '#f97316': '#5a9a44' };
 const recolorUsers = (list) => (list || []).map(u => (OLD_AVATAR[u.color] ? { ...u, color: OLD_AVATAR[u.color] } : u));
 
@@ -87,6 +90,7 @@ function stripForCloud(data) {
     proposals: (data.proposals || []).map(p => ({ ...p, fileData: isStoredFile(p.fileData) ? p.fileData : null })),
     activityLog: data.activityLog || [],
     disciplines: data.disciplines || [],
+    org: data.org || {},
   };
 }
 
@@ -143,6 +147,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
   const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
   const [disciplines, setDisciplines] = useState(withOther(saved?.disciplines));
+  const [org,         setOrg]         = useState(saved?.org || {}); // organisation settings (name, logo, colours)
 
   // ─── Shared cloud database ────────────────────────────────────────────────
   // The whole workspace is one JSON document in Vercel Blob. Every browser:
@@ -152,7 +157,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   //  3. checks for other people's changes every 30 s and when the tab regains focus.
   const [cloudStatus, setCloudStatus] = useState('connecting'); // connecting | ok | offline
   const stateRef = useRef(null);
-  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines };
+  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines, org };
   const baseRef = useRef(null);     // last version seen in the cloud (stripped)
   const etagRef = useRef(null);
   const cloudReady = useRef(false);
@@ -170,6 +175,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     setProposals(s.proposals || []);
     setActivityLog(s.activityLog || []);
     setDisciplines(withOther(s.disciplines));
+    setOrg(s.org || {});
   }, []);
 
   // → { status: 'same' } | { status: 'notFound' } | { status: 'ok', state, etag }
@@ -307,10 +313,16 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
     if (loading) return;
-    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines });
+    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines, org });
     const timer = setTimeout(() => pushToCloud(), 1500);
     return () => clearTimeout(timer);
-  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, loading, pushToCloud]);
+  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, org, loading, pushToCloud]);
+
+  // Organisation colours, page title and icon; remembered for the sign-in page
+  useEffect(() => {
+    applyOrgTheme(org);
+    if (!loading) cacheOrg(org);
+  }, [org, loading]);
 
   // Keep the signed-in user in step with the shared user list (role changes, removal)
   useEffect(() => {
@@ -756,7 +768,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
 
   // ─── Revision Upload ───────────────────────────────────────────────────────
-  const uploadRevision = useCallback((drawingId, changeSummary, pdfDataUrl, newStatus) => {
+  // opts.version: the revision of the file, used when the drawing is an expected MDL record
+  // (nothing received yet: R0 unless given); a received drawing goes up by one.
+  const uploadRevision = useCallback((drawingId, changeSummary, pdfDataUrl, newStatus, opts = {}) => {
     if (!canDo('upload')) return '';
     const authorName = currentUser?.name || 'System';
     let nextVer = '';
@@ -764,12 +778,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const cur = dwg.currentVersion || 'R0';
-      if (cur.match(/^R\d+$/)) {
-        nextVer = `R${parseInt(cur.substring(1)) + 1}`;
-      } else {
-        nextVer = `R${parseInt(cur.replace(/\D/g,'') || '0') + 1}`;
-      }
+      nextVer = nextRevision(dwg, opts.version);
       const rev = {
         version: nextVer,
         date: new Date().toISOString().replace('T',' ').substring(0,16),
@@ -777,9 +786,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         changeSummary: changeSummary || `Revision ${nextVer} uploaded.`,
         pdfData: pdfDataUrl || null
       };
-      logMsg = `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
+      logMsg = dwg.expected
+        ? `<strong>${authorName}</strong> uploaded <strong>${dwg.code}</strong> ${nextVer}: first file received for this MDL record.`
+        : `<strong>${authorName}</strong> uploaded <strong>${nextVer}</strong> of <strong>${dwg.code}</strong>.`;
       const next = {
         ...dwg,
+        ...(dwg.expected ? { expected: false } : {}),
         currentVersion: nextVer,
         pdfData: pdfDataUrl || dwg.pdfData,
         versions: [rev, ...(dwg.versions || [])]
@@ -879,7 +891,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const startReview = (drawingId) => {
     const d = drawings.find(x => x.id === drawingId);
     const p = projectOf(d);
-    if (!d || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return;
+    if (!d || d.expected || !workflowOn(p) || !canDo('upload') || isExternal(currentUser)) return; // nothing to review until a file arrives
     setDrawings(prev => prev.map(x => (x.id === drawingId ? { ...x, review: newReview(x, p, x.review) } : x)));
     addLog(`Review started for <strong>${d.code}</strong> ${d.currentVersion}.`);
   };
@@ -982,6 +994,29 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     addLog('Review workflow settings updated.');
   };
 
+  // ─── MDL import ────────────────────────────────────────────────────────────
+  // plan from utils/mdlImport buildPlan(). One state change: new expected records, updated
+  // MDL columns of existing ones (never deleted), the project's columns and saved mapping.
+  const importMdl = (projectId, plan) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project || !canDo('upload') || isExternal(currentUser)) return null;
+    const res = applyPlan(plan, { project, drawings: drawings.filter(d => d.projectId === projectId), user: currentUser, uid });
+    const changed = new Map(res.drawings.filter(d => res.updatedIds.includes(d.id)).map(d => [d.id, d]));
+    const created = res.drawings.filter(d => res.createdIds.includes(d.id));
+    setDrawings(prev => [...created, ...prev.map(d => changed.get(d.id) || d)]);
+    setProjects(prev => prev.map(p => (p.id === projectId ? { ...p, mdlColumns: res.columns, mdlImportMap: res.mdlImportMap } : p)));
+    if (res.newDisciplines.length) setDisciplines(prev => withOther([...prev, ...res.newDisciplines.filter(x => !prev.includes(x))]));
+    addLog(`MDL import to <strong>${project.code}</strong>: ${res.created} new expected record${res.created === 1 ? '' : 's'}, ${res.updated} updated.`);
+    return res;
+  };
+
+  // ─── Organisation settings ────────────────────────────────────────────────
+  const updateOrg = (updates) => {
+    if (!canDo('admin')) return;
+    setOrg(prev => ({ ...prev, ...updates }));
+    addLog('Organisation settings updated.');
+  };
+
   // ─── Users ─────────────────────────────────────────────────────────────────
   const createUser = (data) => {
     if (!canDo('admin')) return null;
@@ -1036,6 +1071,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (data.proposals) setProposals(data.proposals);
     if (data.activityLog) setActivityLog(data.activityLog);
     if (data.disciplines) setDisciplines(withOther(data.disciplines));
+    if (data.org) setOrg(data.org);
     addLog('Workspace data imported successfully.', currentUser?.name || 'System');
   };
 
@@ -1043,6 +1079,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     <AppContext.Provider value={{
       // State
       currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
+      org: orgOf(org), orgSettings: org, updateOrg,
       authMode, accessDenied, onSignOut, needsLogin, mustChangePassword,
       // Consts
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
@@ -1065,6 +1102,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       recordDownload,
       // Review workflow
       startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
+      // MDL
+      importMdl,
       // Users
       createUser, updateUser, deleteUser,
       // Disciplines

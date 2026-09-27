@@ -17,6 +17,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
 import { readCrs } from '../utils/crs';
+import { normCode } from '../utils/mdl';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -220,7 +221,9 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
                       <div className="drawing-item-code">{dwg.code}</div>
                       <div className="drawing-item-title truncate">{dwg.title}</div>
                       <div className="drawing-item-meta">
-                        <span className="rev-badge">{dwg.currentVersion}</span>
+                        {dwg.expected
+                          ? <span className="stage-chip s-expected" title="Listed in the MDL; no file received yet">Expected</span>
+                          : <span className="rev-badge">{dwg.currentVersion}</span>}
                         {workflowOn(project) && dwg.review && dwg.review.stage !== 'closed' && (
                           <StageChip review={dwg.review} project={project} />
                         )}
@@ -346,6 +349,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
 
 // ─── Register Drawing Modal ──────────────────────────────────────────────────
 function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, createDrawing, uploadCRS }) {
+  const { drawings, uploadRevision } = useContext(AppContext);
   const [crsFile, setCrsFile] = useState(null);
   const [crsParsed, setCrsParsed] = useState(null);
   const [crsMsg, setCrsMsg] = useState('');
@@ -606,6 +610,19 @@ function RegisterDrawingModal({ project, DISCIPLINES, onClose, onCreated, create
       }
     } else {
       setUploading(true);
+    }
+
+    // listed in the MDL and not received yet: the file goes into that record as R0
+    const listed = drawings.find(d => d.projectId === project.id && d.expected && normCode(d.code) === normCode(code));
+    if (listed) {
+      uploadRevision(listed.id, 'Initial issue R0.', uploadedUrl || pdfDataUrl, undefined, { version: 'R0' });
+      if (crsFile) {
+        try { uploadCRS(listed.id, await uploadCrsFile(listed.code, crsFile), crsParsed || await readCrs(crsFile), crsFile.name); }
+        catch (err) { alert('⚠️ File received, but the CRS upload failed: ' + err.message); }
+      }
+      setUploading(false);
+      onCreated(listed.id);
+      return;
     }
 
     const dwg = createDrawing({

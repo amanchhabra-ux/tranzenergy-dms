@@ -50,7 +50,7 @@ export async function loadWorkbookRows(src) {
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true }).slice(0, MAX_CRS_ROWS);
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
   // where row/col 0 of `rows` sits on the sheet, and the last used column
-  rows.geometry = { origin: { r: range.s.r, c: range.s.c }, maxCol: range.e.c };
+  rows.geometry = { origin: { r: range.s.r, c: range.s.c }, maxCol: range.e.c, merges: ws['!merges'] || [] };
   return rows;
 }
 
@@ -291,6 +291,8 @@ export async function applyCrsCells(bytes, cells) {
       cell.value = v === '' ? null : v;
       if (typeof v === 'string' && v.includes('\n')) cell.alignment = { ...(cell.alignment || {}), wrapText: true };
     }
+    // template formulas (e.g. the sheet name built from Document No and Title) still hold the template's old results
+    book.calcProperties = { ...(book.calcProperties || {}), fullCalcOnLoad: true };
     return new Uint8Array(await book.xlsx.writeBuffer());
   }
   const wb = XLSX.read(bytes, { type: 'array', cellDates: true });
@@ -411,7 +413,11 @@ const ISSUE_META = [
   ['consultant', /^(consultant|engineer|owner'?s engineer|pmc)(\s*name)?$/i],
   ['project', /^project(\s*name)?$/i],
   ['date', /^(date|date of issue|issue date|crs date)$/i],
+  ['category', /^(review\s*status|proposed\s*(review\s*)?(status|category)|category)$/i],
 ];
+
+/** The merged range that contains an absolute cell, if any. */
+const mergeAt = (merges, r, c) => (merges || []).find(m => r >= m.s.r && r <= m.e.r && c >= m.s.c && c <= m.e.c);
 
 /** Title-block cells to fill in a template: the first empty cell right of each label. */
 function planMetaWrites(rows, values, headerIdx) {
@@ -429,17 +435,68 @@ function planMetaWrites(rows, values, headerIdx) {
       const [key] = hit;
       const v = values[key];
       if (!v) continue;
-      // the value goes in the next cell to the right, only if it's empty
-      for (let cc = c + 1; cc <= c + 4; cc++) {
-        const existing = clean(row[cc]);
-        if (existing) break;               // already filled (or another label) — leave it
-        cells.push({ r: o.r + r, c: o.c + cc, v });
-        done.add(key);
-        break;
-      }
+      // the value goes in the first cell right of the label (after the label's own merge), only if it's empty
+      const merges = rows.geometry?.merges;
+      const own = mergeAt(merges, o.r + r, o.c + c);
+      const cc = (own ? own.e.c - o.c : c) + 1;
+      if (clean(row[cc])) continue;       // already filled (or another label) — leave it
+      const slot = mergeAt(merges, o.r + r, o.c + cc);
+      if (slot && (slot.s.r !== o.r + r || slot.s.c !== o.c + cc)) continue; // hidden part of a merge
+      cells.push({ r: o.r + r, c: o.c + cc, v });
+      done.add(key);
     }
   }
   return cells;
+}
+
+/** "Category-3" style label for a category key, in the project's own notation. */
+function categoryLabel(key, wf) {
+  if (!key) return '';
+  const fmt = wf.categoryFormat || 'Category {key}';
+  return fmt.replace('{key}', key);
+}
+
+// Per-row columns some contractual templates carry
+const ISSUE_COLS = {
+  rev: /^reviewed\s*rev(ision)?\.?$/i,
+  date: /^(owner'?s?\s*|consultant'?s?\s*)?review\s*date$/i,
+};
+
+/** Reviewed revision and review date for every row the issue wrote. */
+function planIssueColumns(rows, layout, rowMap, values) {
+  const o = layout.origin || { r: 0, c: 0 };
+  const header = rows[layout.headerIdx] || [];
+  const cells = [];
+  for (const [k, re] of Object.entries(ISSUE_COLS)) {
+    const c = header.findIndex(h => re.test(clean(h)));
+    if (c < 0 || !values[k]) continue;
+    const v = k === 'date' ? new Date(values[k] + 'T00:00:00Z') : values[k]; // a real date, so the template's dd-mmm-yy format applies
+    for (const r of Object.values(rowMap)) cells.push({ r: o.r + r, c: o.c + c, v });
+  }
+  return cells;
+}
+
+/**
+ * ExcelJS drops dropdowns stored as Excel 2010 extensions (x14), e.g. a list that points at
+ * another sheet. Read them from the template and add them back as ordinary list validations.
+ */
+async function restoreListValidations(templateBytes, outBytes) {
+  const { default: JSZip } = await import('jszip');
+  const { default: ExcelJS } = await import('exceljs');
+  const zip = await JSZip.loadAsync(templateBytes);
+  const xml = await zip.file('xl/worksheets/sheet1.xml')?.async('string');
+  const found = [...(xml || '').matchAll(/<x14:dataValidation\b[^>]*type="list"[^>]*>([\s\S]*?)<\/x14:dataValidation>/g)]
+    .map(m => ({ f: /<xm:f>([^<]+)<\/xm:f>/.exec(m[1])?.[1], sqref: /<xm:sqref>([^<]+)<\/xm:sqref>/.exec(m[1])?.[1] }))
+    .filter(v => v.f && v.sqref);
+  if (!found.length) return outBytes;
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(outBytes.buffer.slice(outBytes.byteOffset, outBytes.byteOffset + outBytes.byteLength));
+  const ws = book.worksheets[0];
+  for (const { f, sqref } of found) {
+    for (const ref of sqref.split(/\s+/)) ws.getCell(ref.split(':')[0]).dataValidation = { type: 'list', allowBlank: true, formulae: [f] };
+  }
+  book.calcProperties = { ...(book.calcProperties || {}), fullCalcOnLoad: true };
+  return new Uint8Array(await book.xlsx.writeBuffer());
 }
 
 /**
@@ -457,6 +514,7 @@ export async function buildIssuedCrs(drawing, project) {
     clientName: drawing.clientName || wf.clientName || project?.client || '',
     contractor: drawing.contractor || '', consultant: drawing.consultant || wf.consultantName || '',
     project: project?.name || '', date: new Date().toISOString().slice(0, 10),
+    category: categoryLabel(drawing.review?.proposedCategory, wf),
   };
   if (wf.crsTemplate?.url) {
     const bytes = await loadBytes(wf.crsTemplate.url);
@@ -467,8 +525,11 @@ export async function buildIssuedCrs(drawing, project) {
       e.code = 'NO_TABLE'; throw e;
     }
     const meta = planMetaWrites(rows, values, parsed.layout.headerIdx);
-    const plan = planCrsWrites(parsed.layout, table, {}, []);
-    const out = await applyCrsCells(bytes, [...meta, ...plan.cells]);
+    // the sheet names one reviewer for the whole issuing party (e.g. "AEL"), not each person
+    const issuedTable = wf.issueNotation ? table.map(r => ({ ...r, commentBy: wf.issueNotation })) : table;
+    const plan = planCrsWrites(parsed.layout, issuedTable, {}, []);
+    const extra = planIssueColumns(rows, parsed.layout, plan.rowMap, { rev: version, date: values.date });
+    const out = await restoreListValidations(bytes, await applyCrsCells(bytes, [...meta, ...plan.cells, ...extra]));
     return { bytes: out, layout: plan.layout, rowMap: plan.rowMap, fileName };
   }
   const base = new Uint8Array(XLSX.write(crsWorkbook(drawing, project, { emptyTable: true }), { bookType: 'xlsx', type: 'array' }));

@@ -44,6 +44,13 @@ export function ReviewBar({ drawing }) {
   const r = drawing.review;
   const external = isExternal(currentUser);
 
+  if (!r && drawing.expected) {
+    return (
+      <div className="review-bar review-bar-empty">
+        <span>Listed in the MDL, not received yet. The review starts when the file is uploaded.</span>
+      </div>
+    );
+  }
   if (!r) {
     if (external || !canDo('upload')) return null;
     return (
@@ -217,7 +224,7 @@ function IssueModal({ drawing, project, onClose }) {
       </>}>
       <ul className="review-checklist">
         <li><strong>{count}</strong> comment{count === 1 ? '' : 's'} go into the CRS{wf.crsTemplate?.fileName ? <> using the contractual template <strong>{wf.crsTemplate.fileName}</strong></> : ' (standard DMS format — no contractual template set for this project)'}.</li>
-        <li>TranzEnergy's internal comments become visible to {shortName(wf.consultantName, 'the consultant')}.</li>
+        <li>Internal comments become visible to {shortName(wf.consultantName, 'the consultant')}.</li>
         <li>Notified: {notify.length ? notify.join(', ') : <em>nobody set up yet — see Workflow settings</em>}.</li>
         <li>{shortName(wf.consultantName, 'The consultant')} then sends it to {shortName(wf.clientName, 'the client')}.</li>
       </ul>

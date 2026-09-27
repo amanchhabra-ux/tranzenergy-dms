@@ -5,6 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { readCrs } from '../utils/crs';
 import { classifyDrawing, extractDrawingInfo, OTHER_CATEGORY, isExcelFile, matchCrsToDrawing } from '../utils/drawingClassifier';
+import { normCode } from '../utils/mdl';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -49,7 +50,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
 
   const categories = DISCIPLINES.includes(OTHER_CATEGORY) ? DISCIPLINES : [...DISCIPLINES, OTHER_CATEGORY];
   const existingByCode = new Map(
-    drawings.filter(d => d.projectId === project.id).map(d => [d.code.toUpperCase(), d])
+    drawings.filter(d => d.projectId === project.id).map(d => [normCode(d.code), d])
   );
 
   const updateRow = (id, patch) => setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
@@ -159,11 +160,12 @@ export function BulkUploadModal({ project, onClose, onDone }) {
             `drawings/${code.replace(/[^\w.-]+/g, '_')}/${Date.now()}_${safeName}`,
             row.file
           );
-          const existing = existingByCode.get(code) || createdByCode.get(code);
+          const existing = existingByCode.get(normCode(code)) || createdByCode.get(code);
           if (existing) {
-            uploadRevision(existing.id, `Bulk upload: ${row.file.name}`, blob.url);
+            // an expected MDL record takes the revision of the file (R0 by default)
+            const ver = uploadRevision(existing.id, `Bulk upload: ${row.file.name}`, blob.url, undefined, { version: row.rev || 'R0' });
             rowToDwgId.set(row.id, existing.id);
-            updateRow(row.id, { status: 'done', message: 'Added as new revision' });
+            updateRow(row.id, { status: 'done', message: existing.expected ? `Received as ${ver || row.rev || 'R0'} (MDL record)` : 'Added as new revision' });
           } else {
             const dwg = createDrawing({
               code, title: row.title.trim() || code, discipline: row.category,
@@ -317,7 +319,8 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                   </thead>
                   <tbody>
                     {visibleRows.map(r => {
-                      const exists = existingByCode.has(r.code.trim().toUpperCase());
+                      const exists = existingByCode.has(normCode(r.code));
+                      const expected = exists && existingByCode.get(normCode(r.code)).expected;
                       const dup = dupInBatch(r.code);
                       const editable = !locked && r.status === 'ready';
                       return (
@@ -341,7 +344,7 @@ export function BulkUploadModal({ project, onClose, onDone }) {
                               onChange={e => updateRow(r.id, { code: e.target.value.toUpperCase() })} />
                             {(exists || dup) && r.status !== 'done' && (
                               <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: 2 }}>
-                                {exists ? 'Exists — will add a revision' : 'Repeated in this batch — later ones become revisions'}
+                                {expected ? `Listed in the MDL — received as ${r.rev || 'R0'}` : exists ? 'Exists — will add a revision' : 'Repeated in this batch — later ones become revisions'}
                               </div>
                             )}
                           </td>
