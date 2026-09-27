@@ -1,5 +1,6 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
+import { LoadMore } from './ActivityPanel';
 import { Zap, Sun, Battery, Wind, FileText, CheckCircle, Clock, AlertCircle, Plus, ArrowRight } from 'lucide-react';
 
 const TYPE_META = {
@@ -10,7 +11,8 @@ const TYPE_META = {
 };
 
 export function Dashboard({ onOpenProject }) {
-  const { currentUser, projects, drawings, activityLog, canDo, createProject } = useContext(AppContext);
+  const { currentUser, projects, drawings, activityLog, logHasMore, loadMoreLog, canDo, createProject } = useContext(AppContext);
+  const [logShown, setLogShown] = useState(18);
   const [showNewProject, setShowNewProject] = React.useState(false);
   const [form, setForm] = React.useState({ code:'', name:'', client:'', clientContact:'', type:'transmission', location:'' });
 
@@ -125,7 +127,7 @@ export function Dashboard({ onOpenProject }) {
                     <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '13px' }}>
                       No recent activity.
                     </div>
-                  ) : activityLog.slice(0, 18).map(log => (
+                  ) : activityLog.slice(0, logShown).map(log => (
                     <div key={log.id} className="activity-item">
                       <div className="activity-dot" style={{ background: 'var(--primary)' }} />
                       <div>
@@ -139,6 +141,12 @@ export function Dashboard({ onOpenProject }) {
                       </div>
                     </div>
                   ))}
+                  {(activityLog.length > logShown || logHasMore) && (
+                    <LoadMore onLoad={async () => {
+                      if (activityLog.length < logShown + 18 && logHasMore) await loadMoreLog();
+                      setLogShown(n => n + 18);
+                    }} />
+                  )}
                 </div>
               </div>
             </div>

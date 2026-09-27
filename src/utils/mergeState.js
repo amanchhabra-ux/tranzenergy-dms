@@ -30,15 +30,8 @@ function mergeById(base = [], local = [], remote = [], deep) {
   return order.filter(id => out.has(id) && !seen.has(id) && seen.add(id)).map(id => out.get(id));
 }
 
-// The server stamps the time of each new log and activity entry, so for an entry both
-// sides hold, the stored copy wins. The caps match the server's (api/_lib/view.js).
-// The real fix is to move the log out of this document into append-only storage, a later step.
-const CAP = 5000;
-function mergeLog(local = [], remote = []) {
-  const m = new Map();
-  [...local, ...remote].forEach(l => m.set(l.id, l));
-  return [...m.values()].sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, CAP);
-}
+// The activity log and the drawings' activity are not in this document any more
+// (append-only entries on the server, api/_lib/log.js), so there is nothing to merge for them.
 
 function mergeList(base = [], local = [], remote = []) {
   const removed = new Set(base.filter(x => !local.includes(x)));
@@ -53,7 +46,7 @@ function mergeList(base = [], local = [], remote = []) {
 function mergeDrawing(b, l, r) {
   const out = { ...r };
   for (const k of new Set([...Object.keys(l), ...Object.keys(b)])) {
-    if (['pins', 'crsImported', 'review', 'activity'].includes(k)) continue;
+    if (['pins', 'crsImported', 'review'].includes(k)) continue;
     if (!same(b[k], l[k])) out[k] = l[k];
   }
   out.pins = mergeById(b.pins || [], l.pins || [], r.pins || [], (bp, lp, rp) => {
@@ -66,12 +59,6 @@ function mergeDrawing(b, l, r) {
   // rows without ids (read from an Excel) follow whoever changed them
   const noId = (x) => (x.crsImported || []).filter(c => !c.id);
   out.crsImported = [...(same(noId(b), noId(l)) ? noId(r) : noId(l)), ...out.crsImported];
-  // activity trail: everyone's entries, in time order
-  if (!same(b.activity, l.activity) || !same(b.activity, r.activity)) {
-    const all = new Map();
-    [...(l.activity || []), ...(r.activity || [])].forEach(e => e?.id && all.set(e.id, e));
-    out.activity = [...all.values()].sort((x, y) => String(x.at).localeCompare(String(y.at))).slice(-CAP);
-  }
   if (!same(b.review, l.review)) {
     if (!r.review || same(b.review, r.review)) out.review = l.review;
     else {
@@ -93,7 +80,6 @@ export function mergeState(base, local, remote) {
     projects: mergeById(base.projects, local.projects, remote.projects),
     drawings: mergeById(base.drawings, local.drawings, remote.drawings, mergeDrawing),
     proposals: mergeById(base.proposals, local.proposals, remote.proposals),
-    activityLog: mergeLog(local.activityLog, remote.activityLog),
     disciplines: mergeList(base.disciplines, local.disciplines, remote.disciplines),
     // organisation settings: ours if we changed them, else theirs
     org: same(base.org || {}, local.org || {}) ? (remote.org || {}) : (local.org || {}),
