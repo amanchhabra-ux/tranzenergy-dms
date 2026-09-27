@@ -27,6 +27,26 @@ Once any admin has a password, neither bootstrap route applies: sign-in is by pa
 
 Local development (`npm run dev`) keeps its data in `.local-data`. On an empty `.local-data`, start it with `ADMIN_EMAILS=aman@tranzenergy.in npm run dev` (or with `ADMIN_BOOTSTRAP_TOKEN`) to set the first password.
 
+## Storage (Cloudflare R2)
+
+| Variable | Needed | What it does |
+|---|---|---|
+| `R2_ACCOUNT_ID` | Yes | Cloudflare account that holds the bucket. |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Yes | R2 API token with read and write on the bucket. |
+| `R2_BUCKET` | Yes | The bucket: drawings, CRS files, the workspace document `_system/db_state_v5.json` and the password store. Keep a copy of `_system/db_state_v5.json` before a deploy that changes how it is saved. |
+
+## Email notifications (Resend)
+
+Review-stage changes are emailed to the people of that stage once these are set (`api/_lib/notify.js`).
+
+| Variable | Needed | What it does |
+|---|---|---|
+| `RESEND_API_KEY` | To send | API key from resend.com, restricted to sending from the notification domain. Mark it Sensitive. |
+| `NOTIFY_FROM` | To send | The sender, e.g. `Tranz Energy DMS <dms@notify.tranzenergy.com>`, on a domain verified in Resend (DKIM and the two CNAME records in DNS). |
+| `APP_URL` | Recommended | The link put in emails, e.g. `https://tranzenergy-dms.vercel.app`. Without it the "App link in emails" of Admin → Organisation is used; without either, emails carry no link. |
+
+Environment variables are read at deploy time: after adding or changing one, redeploy (Deployments → ⋯ → Redeploy) or merge the next change into `main`.
+
 ## Pipeline API (review pipeline)
 
 A small token-authenticated API for TranzEnergy's review pipeline, in `api/pipeline/[action].js` (one function; the rules are in `api/_lib/pipeline.js`):
