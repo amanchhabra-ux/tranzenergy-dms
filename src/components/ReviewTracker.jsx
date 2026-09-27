@@ -82,13 +82,16 @@ export function ReviewTracker({ project, onOpenDrawing }) {
               const who = r && r.stage !== 'closed' ? stageActors(project, r.stage).map(name).filter(Boolean) : [];
               const open = openCommentCount(d);
               return (
-                <tr key={d.id} onClick={() => onOpenDrawing(d.id)}>
+                <tr key={d.id} onClick={() => onOpenDrawing(d.id)} className={due.kind === 'overdue' ? 'tracker-overdue' : undefined}>
                   <td><div className="tracker-code">{d.code}</div><div className="tracker-title">{d.title}</div></td>
                   <td>{d.currentVersion}{r?.cycle > 1 ? <div className="tracker-sub">cycle {r.cycle}</div> : null}</td>
                   <td><StageChip review={r} project={project} /></td>
                   <td className="tracker-sub">{who.join(', ') || '—'}</td>
                   <td className="tracker-sub">{r?.proposedCategory ? categoryText(r.proposedCategory, project.workflow) : '—'}</td>
-                  <td>{due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">—</span>}</td>
+                  <td title={r?.dueSource ? `Source: ${r.dueSource}` : undefined}>
+                    {due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">{r?.dueDate || '—'}</span>}
+                    {r?.dueDate && due.kind !== 'none' && <div className="tracker-sub">{r.dueDate}{r.dueSource ? ` · ${r.dueSource}` : ''}</div>}
+                  </td>
                   <td className="tracker-sub">{open ? `${open} open` : '—'}</td>
                   <td><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
                 </tr>

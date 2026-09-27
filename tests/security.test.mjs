@@ -608,6 +608,44 @@ await test('before issue the consultant does not see our proposed category', asy
   assert.ok(stored().drawings[0].review.history.some(h => h.id === 'hp'));
 });
 
+// ── PR 4: due date and its source ──────────────────────────────────────────────
+await test('consultant changing dueDate / dueSource while forwarding to the client -> kept', async () => {
+  seed(atStage('consultant', { dueDate: '2026-10-04', dueSource: 'Atlanta email 24.09.2026: by 30.09' }));
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.review = { ...d.review, stage: 'client', dueDate: '2099-12-31', dueSource: 'agreed by phone' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.stage, 'client');
+  assert.equal(rv.dueDate, '2026-10-04');
+  assert.equal(rv.dueSource, 'Atlanta email 24.09.2026: by 30.09');
+});
+
+await test('consultant changing dueDate / dueSource alone, at any stage -> kept', async () => {
+  for (const stage of ['ir1', 'consultant', 'client']) {
+    seed(atStage(stage, { dueDate: '2026-10-04', dueSource: 'project default' }));
+    const v = viewOf('u7');
+    const d = v.drawings.find(x => x.id === 'd1');
+    d.review = { ...d.review, dueDate: '2099-12-31', dueSource: 'forged',
+      history: [...d.review.history, { id: 'forgedDue', action: 'due', oldDue: '2026-10-04', newDue: '2099-12-31' }] };
+    assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+    const rv = stored().drawings[0].review;
+    assert.deepEqual([stage, rv.dueDate, rv.dueSource], [stage, '2026-10-04', 'project default']);
+    assert.ok(!rv.history.some(h => h.id === 'forgedDue'));
+  }
+});
+
+await test('consultant new revision: due date and source set by the server ("project default")', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  const d = newRevision(v, PDF('drawings/E-001/1727000000000123999_sld_r1.pdf'));
+  d.review = { ...d.review, dueDate: '2099-01-01', dueSource: 'forged' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.dueDate, addDaysIso(10));
+  assert.equal(rv.dueSource, 'project default');
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });

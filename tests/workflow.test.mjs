@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   DEFAULT_CATEGORIES, AEL_CATEGORIES, categoriesOf, findCategory, categoryText, reviewWithCategory, reviewWithProposed, categoriesInUse, newReviewFor,
+  reviewWithDue, canEditDue, DEFAULT_DUE_SOURCE, addDays, today,
 } from '../src/utils/workflow.js';
 import { TE002_MDL_COLUMNS, cellValue } from '../src/utils/mdl.js';
 
@@ -109,6 +110,47 @@ test('a new cycle clears the proposed category and archives the old one', () => 
   const next = newReviewFor({ currentVersion: 'R1', pins: [], crsImported: [] }, { workflow: { turnaroundDays: 10 } }, prev, { entry });
   assert.equal(next.proposedCategory, null);
   assert.equal(next.cycles[0].proposedCategory, '2');
+});
+
+// ── Due date with its source ─────────────────────────────────────────────────
+test('a review starts due in the project turnaround, source "project default"', () => {
+  const r = newReviewFor({ currentVersion: 'R0' }, { workflow: { turnaroundDays: 10 } }, null, { entry });
+  assert.equal(r.dueSource, DEFAULT_DUE_SOURCE);
+  assert.equal(DEFAULT_DUE_SOURCE, 'project default');
+  assert.equal(r.dueDate, addDays(today(), 10));
+});
+
+test('due date edit writes a history entry with old and new values', () => {
+  const r0 = { stage: 'ir1', dueDate: '2026-10-04', dueSource: 'project default', history: [] };
+  const r1 = reviewWithDue(r0, { dueDate: '2026-09-30', dueSource: 'Atlanta email 24.09.2026: by 30.09' }, { entry });
+  assert.equal(r1.dueDate, '2026-09-30');
+  assert.equal(r1.dueSource, 'Atlanta email 24.09.2026: by 30.09');
+  const h = r1.history.at(-1);
+  assert.deepEqual([h.action, h.oldDue, h.newDue, h.oldSource, h.newSource],
+    ['due', '2026-10-04', '2026-09-30', 'project default', 'Atlanta email 24.09.2026: by 30.09']);
+  assert.match(h.note, /2026-10-04 → 2026-09-30/);
+  assert.match(h.note, /project default → Atlanta email/);
+  // source only
+  const r2 = reviewWithDue(r1, { dueDate: '2026-09-30', dueSource: 'RPCL letter 17' }, { entry });
+  assert.deepEqual([r2.history.at(-1).oldDue, r2.history.at(-1).newDue, r2.history.at(-1).newSource], ['2026-09-30', '2026-09-30', 'RPCL letter 17']);
+  // nothing changed: no entry
+  assert.equal(reviewWithDue(r2, { dueDate: '2026-09-30', dueSource: 'RPCL letter 17' }, { entry }), r2);
+  // not a date
+  assert.equal(reviewWithDue(r2, { dueDate: '30.09.2026', dueSource: '' }, { entry }), null);
+  assert.equal(reviewWithDue(r2, { dueDate: '', dueSource: '' }, { entry }), null);
+});
+
+test('who may edit the due date: admins, approvers and the issuer, never a consultant', () => {
+  const project = { workflow: { finalCheck: false, firstReviewers: ['u3'], secondReviewers: ['u4'], approvers: ['u6'] } };
+  const u = (id, role = 'Engineer') => ({ id, role });
+  assert.equal(canEditDue(u('u1', 'Admin'), project), true);
+  assert.equal(canEditDue(u('u6'), project), true, 'approver');
+  assert.equal(canEditDue(u('u4'), project), true, 'TE Review Engineer issues when there is no final check');
+  assert.equal(canEditDue(u('u3'), project), false, 'first reviewer');
+  assert.equal(canEditDue(u('u2', 'Project Manager'), project), false);
+  assert.equal(canEditDue(u('u7', 'Consultant'), { workflow: { ...project.workflow, approvers: ['u7'] } }), false);
+  const withCheck = { workflow: { ...project.workflow, finalCheck: true } };
+  assert.equal(canEditDue(u('u4'), withCheck), false, 'with a final check the approver issues');
 });
 
 console.log(failed ? `\n${failed} of ${n} checks FAILED.` : `\nAll ${n} checks passed.`);

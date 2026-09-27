@@ -4,7 +4,7 @@ import { AppContext } from '../AppContext';
 import { X, Clock, History, Send, CheckCircle2, Flag, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import {
   STAGE, categoriesOf, findCategory, categoryText, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
-  dueState, today, openCommentCount, finalCheckOn, issuingStage, stageName,
+  dueState, today, openCommentCount, canEditDue, finalCheckOn, issuingStage, stageName,
 } from '../utils/workflow';
 
 const shortName = (s, fallback) => (s || fallback).replace(/\s*\(.*\)\s*$/, '');
@@ -74,6 +74,7 @@ export function ReviewBar({ drawing }) {
   const cat = r.category ? { label: categoryText(r.category, wf) } : null;
   // a closed review can still hold open comments (approved with comments): track them to closure
   const openLeft = r.stage === 'closed' ? openCommentCount(drawing) : 0;
+  const mayEditDue = canEditDue(currentUser, project);
 
   let action = null;
   if (mine && !done) {
@@ -111,7 +112,8 @@ export function ReviewBar({ drawing }) {
           </span>
         )}
         {due.kind !== 'none' && (
-          <button className={`review-due ${due.kind}`} onClick={() => (canDo('manage_projects') || mine) && !external ? setModal('due') : null} title={`Due ${r.dueDate}`}>
+          <button className={`review-due ${due.kind}`} onClick={() => (mayEditDue ? setModal('due') : null)} style={mayEditDue ? undefined : { cursor: 'default' }}
+            title={`Due ${r.dueDate}${r.dueSource ? ` · source: ${r.dueSource}` : ''}${mayEditDue ? ' · click to change' : ''}`}>
             {due.kind === 'overdue' ? <AlertTriangle size={12} /> : <Clock size={12} />} {due.text}
           </button>
         )}
@@ -293,16 +295,29 @@ function CategoryModal({ drawing, project, onClose }) {
 function DueModal({ drawing, onClose }) {
   const { setReviewDue } = useContext(AppContext);
   const [date, setDate] = useState(drawing.review.dueDate || today());
+  const [source, setSource] = useState(drawing.review.dueSource || '');
+  const [err, setErr] = useState('');
+  const save = () => {
+    if (!date) { setErr('Pick a date.'); return; }
+    if (setReviewDue(drawing.id, date, source.trim()) === false) { setErr('Could not change the due date.'); return; }
+    onClose();
+  };
   return (
     <Modal title="Change due date" sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => { setReviewDue(drawing.id, date); onClose(); }}>Save</button>
+        <button className="btn btn-primary" onClick={save}>Save</button>
       </>}>
-      <div className="form-group" style={{ marginBottom: 0 }}>
-        <label className="form-label">Due date</label>
-        <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} />
+      <div className="form-group">
+        <label className="form-label" htmlFor="due-date">Due date</label>
+        <input id="due-date" type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} />
       </div>
+      <div className="form-group" style={{ marginBottom: 0 }}>
+        <label className="form-label" htmlFor="due-source">Source</label>
+        <input id="due-source" className="form-input" value={source} onChange={e => setSource(e.target.value)} placeholder="e.g. Atlanta email 24.09.2026: by 30.09" maxLength={500} />
+        <div className="wf-hint">Where the date comes from. The change and the old values go into the review history.</div>
+      </div>
+      {err && <div className="review-error">⚠️ {err}</div>}
     </Modal>
   );
 }

@@ -111,6 +111,8 @@ export function categoriesInUse(drawings, projectId) {
 }
 
 export const DEFAULT_TURNAROUND_DAYS = 14;
+// review.dueSource when the due date is the project's turnaround from the review start
+export const DEFAULT_DUE_SOURCE = 'project default';
 
 export const EXTERNAL_ROLE = 'Consultant';
 export const isExternal = (user) => user?.role === EXTERNAL_ROLE;
@@ -170,7 +172,7 @@ export function newReviewFor(d, project, prev, { entry, note = '', by = '' } = {
   const subNote = String(note || '').trim();
   return {
     cycle, version: d.currentVersion || 'R0', stage: 'ir1',
-    startedAt: today(), dueDate: addDays(today(), days), category: null, proposedCategory: null, issued: null,
+    startedAt: today(), dueDate: addDays(today(), days), dueSource: DEFAULT_DUE_SOURCE, category: null, proposedCategory: null, issued: null,
     // the uploader's note for the reviewers (step 1)
     note: subNote ? { text: subNote, by: by || 'Someone', at: new Date().toISOString() } : null,
     cycles: archived,
@@ -198,6 +200,39 @@ export function canActOnStage(user, project, stageKey) {
   if (!user || !stageKey || stageKey === 'closed') return false;
   if (user.role === 'Admin' && !isExternal(user)) return true;
   return stageActors(project, stageKey).includes(user.id);
+}
+
+/**
+ * Who may change a review's due date and its source: internal admins, the approvers, and
+ * whoever issues the CRS (the TE Review Engineer when there is no final check).
+ * Under cl 9.1 the period is agreed at each referral, so the date is edited per document.
+ */
+export function canEditDue(user, project) {
+  if (!user || isExternal(user)) return false;
+  if (user.role === 'Admin') return true;
+  const wf = project?.workflow || {};
+  return (wf.approvers || []).includes(user.id) || stageActors(project, issuingStage(wf)).includes(user.id);
+}
+
+const isoDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(new Date(`${v}T00:00:00Z`));
+
+/**
+ * The review with a new due date and its source ("Atlanta email 24.09.2026: by 30.09"),
+ * and a history entry with the old and new values. The same review when nothing changes;
+ * null for a date that is not YYYY-MM-DD.
+ */
+export function reviewWithDue(review, { dueDate, dueSource }, { entry } = {}) {
+  if (!review || !isoDay(dueDate)) return null;
+  const source = String(dueSource ?? '').trim().slice(0, 500);
+  const oldDue = review.dueDate || null, oldSource = review.dueSource || '';
+  if (oldDue === dueDate && oldSource === source) return review;
+  const parts = [oldDue === dueDate ? `Due ${dueDate}` : `Due ${oldDue || '(none)'} → ${dueDate}`];
+  if (oldSource !== source) parts.push(`source: ${oldSource || '(none)'} → ${source || '(none)'}`);
+  else if (source) parts.push(`source: ${source}`);
+  return {
+    ...review, dueDate, dueSource: source,
+    history: [...(review.history || []), entry('due', { oldDue, newDue: dueDate, oldSource, newSource: source, note: parts.join('; ') })],
+  };
 }
 
 /** Due-date state for display. */

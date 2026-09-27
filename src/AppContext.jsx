@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, reviewWithProposed, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, reviewWithProposed, reviewWithDue, canEditDue, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
@@ -974,12 +974,18 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
   const p0 = (p) => p?.workflow?.clientName || 'Client';
 
-  const setReviewDue = (drawingId, dueDate) => {
+  // Due date per document and where it comes from (cl 9.1: agreed at each referral).
+  // Approvers, the issuer and admins, internal only; the history keeps old and new values.
+  const setReviewDue = (drawingId, dueDate, dueSource) => {
     const d = drawings.find(x => x.id === drawingId);
-    if (!d?.review || !(canDo('manage_projects') || canAct(d))) return;
+    if (!d?.review || !canEditDue(currentUser, projectOf(d))) return false;
+    const source = dueSource ?? d.review.dueSource ?? '';
+    if (!reviewWithDue(d.review, { dueDate, dueSource: source }, { entry: histEntry })) return false;
     setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
-      ...x, review: { ...x.review, dueDate, history: [...(x.review.history || []), histEntry('due', { note: `Due date set to ${dueDate}` })] },
+      ...x, review: reviewWithDue(x.review, { dueDate, dueSource: source }, { entry: histEntry }) || x.review,
     })));
+    if (dueDate !== d.review.dueDate) addLog(`<strong>${d.code}</strong>: due date ${d.review.dueDate || '(none)'} → ${dueDate}.`);
+    return true;
   };
 
   // Admin correction: move a review to any stage
