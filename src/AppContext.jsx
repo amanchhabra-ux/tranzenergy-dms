@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, reviewWithProposed, reviewWithDue, canEditDue, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
@@ -912,18 +912,22 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
 
   // Steps 5–6: the approver submits; the CRS is issued in the contractual template
-  const issueToConsultant = async (drawingId, note = '') => {
+  // proposedCategory: our proposed category, picked by whoever issues (the approver, or the
+  // TE Review Engineer when there is no final check); it fills the sheet's Review Status
+  const issueToConsultant = async (drawingId, note = '', proposedCategory = null) => {
     const d = drawings.find(x => x.id === drawingId);
     const p = projectOf(d);
     const from = d?.review?.stage;
     if (!d || from !== issuingStage(p?.workflow) || !canAct(d)) throw new Error('Not allowed at this stage.');
+    const proposedKey = proposedCategory ?? d.review.proposedCategory;
+    if (!findCategory(p?.workflow, proposedKey)) throw new Error('Pick our proposed category first.');
     // publish TranzEnergy's comments, then build the sheet from what will be visible.
     // Comments read from an earlier Excel become sheet rows of their own in the new template.
     const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis, ...rest } = o; return rest; };
     const asLocal = (c) => (c.local ? pub(c) : { ...pub(c), local: true, id: c.id || uid('crs'), row: undefined, sno: undefined });
     const pins = (d.pins || []).map(pin => ({ ...pub(pin), comments: (pin.comments || []).map(pub) }));
     const items = (d.crsImported || []).map(asLocal);
-    const published = { ...d, pins, crsImported: items, crsRowMap: {} };
+    const published = { ...d, pins, crsImported: items, crsRowMap: {}, review: { ...d.review, proposedCategory: findCategory(p?.workflow, proposedKey).key } };
     const { bytes, layout, rowMap, fileName } = await buildIssuedCrs(published, p);
     const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     // a frozen copy of what was sent, and a working copy that keeps syncing
@@ -945,10 +949,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
         crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
         activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
-        review: {
-          ...x.review, stage: 'consultant', issued: { ...issued, ...issuedMap },
-          history: [...(x.review.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
-        },
+        review: (() => {
+          const withCat = reviewWithProposed(x.review, p?.workflow, proposedKey, { entry: histEntry }) || x.review;
+          return {
+            ...withCat, stage: 'consultant', issued: { ...issued, ...issuedMap },
+            history: [...(withCat.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
+          };
+        })(),
       };
     }));
     addLog(`<strong>${d.code}</strong> ${d.currentVersion}: CRS submitted to ${p?.workflow?.consultantName || 'the consultant'}.`);
@@ -957,25 +964,28 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Step 8: the client's category (recorded by us — the client doesn't sign in)
   const recordCategory = (drawingId, category, note = '', decidedOn = today()) => {
     const d = drawings.find(x => x.id === drawingId);
-    const cat = CATEGORIES.find(c => c.key === category);
+    const wf = projectOf(d)?.workflow;
+    const cat = findCategory(wf, category); // the project's own list (default list when it has none)
     if (!d || !cat || d.review?.stage !== 'client' || !canAct(d)) return;
-    const to = cat.closes ? 'closed' : 'resubmit';
     setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
-      ...x, review: {
-        ...x.review, stage: to, category, decidedOn, closedAt: cat.closes ? today() : null,
-        history: [...(x.review.history || []), histEntry('category', { from: 'client', to, category, note, decidedOn })],
-      },
+      ...x, review: reviewWithCategory(x.review, wf, category, { entry: histEntry, note, decidedOn }) || x.review,
     })));
-    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${cat.label}</strong>.`);
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${categoryText(cat.key, wf)}</strong>.`);
   };
   const p0 = (p) => p?.workflow?.clientName || 'Client';
 
-  const setReviewDue = (drawingId, dueDate) => {
+  // Due date per document and where it comes from (cl 9.1: agreed at each referral).
+  // Approvers, the issuer and admins, internal only; the history keeps old and new values.
+  const setReviewDue = (drawingId, dueDate, dueSource) => {
     const d = drawings.find(x => x.id === drawingId);
-    if (!d?.review || !(canDo('manage_projects') || canAct(d))) return;
+    if (!d?.review || !canEditDue(currentUser, projectOf(d))) return false;
+    const source = dueSource ?? d.review.dueSource ?? '';
+    if (!reviewWithDue(d.review, { dueDate, dueSource: source }, { entry: histEntry })) return false;
     setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
-      ...x, review: { ...x.review, dueDate, history: [...(x.review.history || []), histEntry('due', { note: `Due date set to ${dueDate}` })] },
+      ...x, review: reviewWithDue(x.review, { dueDate, dueSource: source }, { entry: histEntry }) || x.review,
     })));
+    if (dueDate !== d.review.dueDate) addLog(`<strong>${d.code}</strong>: due date ${d.review.dueDate || '(none)'} → ${dueDate}.`);
+    return true;
   };
 
   // Admin correction: move a review to any stage
@@ -1085,6 +1095,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth
       login, logout,
+      // server configuration problems an admin should see (e.g. 'session_secret'), from /api/me
+      serverWarnings: me?.warnings || [],
       // Permissions
       canDo,
       // Projects

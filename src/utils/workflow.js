@@ -27,14 +27,92 @@ export const NEXT_STAGE = { ir1: 'ir2', ir2: 'approval', approval: 'consultant',
 // before the CRS is issued, TranzEnergy's comments are internal (hidden from the consultant)
 export const PRE_ISSUE = new Set(['ir1', 'ir2', 'approval']);
 
-export const CATEGORIES = [
+// Review categories. A project can set its own list in workflow.categories
+// ([{ key, label, desc, closes }], admins only); a project without one uses this list.
+// `closes`: the client's category closes the review; otherwise it waits for a resubmission.
+export const DEFAULT_CATEGORIES = [
   { key: '1',  label: 'Category 1', desc: 'Approved — no comments',                closes: true },
   { key: '2',  label: 'Category 2', desc: 'Approved with comments — track to close', closes: true },
   { key: '3',  label: 'Category 3', desc: 'Not approved — revise and resubmit',     closes: false },
   { key: '4B', label: 'Category 4B', desc: 'Rejected — resubmit',                    closes: false },
 ];
+/** @deprecated the fixed list; use categoriesOf(project.workflow) */
+export const CATEGORIES = DEFAULT_CATEGORIES;
+
+// The legend of the AEL CRS template (Help sheet), TE-002. Only 1 and 4A close a review.
+export const AEL_CATEGORIES = [
+  { key: '1',   label: 'Category-1',   desc: 'Approved and Distributed.', closes: true },
+  { key: '2',   label: 'Category-2',   desc: 'Approved subject to incorporation of comments. Re-submit for approval after incorporation of comments.', closes: false },
+  { key: '2*',  label: 'Category-2*',  desc: 'Approved subject to incorporation of comments and re-submission in due course. Meanwhile, please proceed with execution.', closes: false },
+  { key: '3',   label: 'Category-3',   desc: 'Not approved. Re-submit for approval after incorporation of comments.', closes: false },
+  { key: '4A',  label: 'Category-4A',  desc: 'Kept for record/ reference.', closes: true },
+  { key: '4B',  label: 'Category-4B',  desc: 'Re-submit after incorporation of comments to retain for record/ reference.', closes: false },
+  { key: '4B*', label: 'Category-4B*', desc: 'Re-submit after incorporation of comments in due course in order to keep for record/ reference. Meanwhile, please proceed with execution.', closes: false },
+];
+
+/** The project's category list (wf = project.workflow). */
+export function categoriesOf(wf) {
+  const list = Array.isArray(wf?.categories) ? wf.categories.filter(c => c && String(c.key ?? '').trim()) : [];
+  return list.length ? list.map(c => ({ ...c, key: String(c.key).trim(), closes: c.closes === true })) : DEFAULT_CATEGORIES;
+}
+export const findCategory = (wf, key) => (key == null || key === '' ? null : categoriesOf(wf).find(c => c.key === String(key)) || null);
+
+/**
+ * How a category is written on the issued sheet, in the MDL and in the app: the label from
+ * the project's own list when it has one; else the project's categoryFormat ("Category-{key}");
+ * else "Category {key}".
+ */
+export function categoryText(key, wf) {
+  if (key == null || key === '') return '';
+  const own = Array.isArray(wf?.categories) && wf.categories.length ? findCategory(wf, key) : null;
+  if (own?.label) return own.label;
+  return String(wf?.categoryFormat || 'Category {key}').replace('{key}', key);
+}
+
+/**
+ * Step 8: the review after the client's category. A category that closes (per the project's
+ * list) closes it; any other waits for the resubmission. null for an unknown category.
+ */
+export function reviewWithCategory(review, wf, key, { entry, note = '', decidedOn = today() } = {}) {
+  const cat = findCategory(wf, key);
+  if (!review || !cat) return null;
+  const to = cat.closes ? 'closed' : 'resubmit';
+  return {
+    ...review, stage: to, category: cat.key, decidedOn, closedAt: cat.closes ? today() : null,
+    history: [...(review.history || []), entry('category', { from: review.stage, to, category: cat.key, note, decidedOn })],
+  };
+}
+
+/**
+ * Our proposed category, picked at the stage that issues the CRS (steps 4-5). It fills the
+ * issued sheet's Review Status and the MDL's "TE category". A history entry records it.
+ * null for a category outside the project's list.
+ */
+export function reviewWithProposed(review, wf, key, { entry } = {}) {
+  const cat = findCategory(wf, key);
+  if (!review || !cat) return null;
+  if (review.proposedCategory === cat.key) return review;
+  return {
+    ...review, proposedCategory: cat.key,
+    history: [...(review.history || []), entry('proposed', { category: cat.key, previous: review.proposedCategory || null })],
+  };
+}
+
+/** Keys a project's reviews use (current and archived cycles): these cannot be deleted from its list. */
+export function categoriesInUse(drawings, projectId) {
+  const used = new Set();
+  for (const d of drawings || []) {
+    if (d?.projectId !== projectId || !d.review) continue;
+    const r = d.review;
+    [r.category, r.proposedCategory, ...(r.cycles || []).flatMap(c => [c?.category, c?.proposedCategory])]
+      .forEach(k => { if (k != null && k !== '') used.add(String(k)); });
+  }
+  return used;
+}
 
 export const DEFAULT_TURNAROUND_DAYS = 14;
+// review.dueSource when the due date is the project's turnaround from the review start
+export const DEFAULT_DUE_SOURCE = 'project default';
 
 export const EXTERNAL_ROLE = 'Consultant';
 export const isExternal = (user) => user?.role === EXTERNAL_ROLE;
@@ -87,14 +165,14 @@ export function newReviewFor(d, project, prev, { entry, note = '', by = '' } = {
   const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
   const cycle = (prev?.cycle || 0) + 1;
   const archived = prev ? [...(prev.cycles || []), {
-    cycle: prev.cycle, version: prev.version, category: prev.category || null,
+    cycle: prev.cycle, version: prev.version, category: prev.category || null, proposedCategory: prev.proposedCategory || null,
     stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
   }] : [];
   const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
   const subNote = String(note || '').trim();
   return {
     cycle, version: d.currentVersion || 'R0', stage: 'ir1',
-    startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+    startedAt: today(), dueDate: addDays(today(), days), dueSource: DEFAULT_DUE_SOURCE, category: null, proposedCategory: null, issued: null,
     // the uploader's note for the reviewers (step 1)
     note: subNote ? { text: subNote, by: by || 'Someone', at: new Date().toISOString() } : null,
     cycles: archived,
@@ -124,6 +202,39 @@ export function canActOnStage(user, project, stageKey) {
   return stageActors(project, stageKey).includes(user.id);
 }
 
+/**
+ * Who may change a review's due date and its source: internal admins, the approvers, and
+ * whoever issues the CRS (the TE Review Engineer when there is no final check).
+ * Under cl 9.1 the period is agreed at each referral, so the date is edited per document.
+ */
+export function canEditDue(user, project) {
+  if (!user || isExternal(user)) return false;
+  if (user.role === 'Admin') return true;
+  const wf = project?.workflow || {};
+  return (wf.approvers || []).includes(user.id) || stageActors(project, issuingStage(wf)).includes(user.id);
+}
+
+const isoDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(new Date(`${v}T00:00:00Z`));
+
+/**
+ * The review with a new due date and its source ("Atlanta email 24.09.2026: by 30.09"),
+ * and a history entry with the old and new values. The same review when nothing changes;
+ * null for a date that is not YYYY-MM-DD.
+ */
+export function reviewWithDue(review, { dueDate, dueSource }, { entry } = {}) {
+  if (!review || !isoDay(dueDate)) return null;
+  const source = String(dueSource ?? '').trim().slice(0, 500);
+  const oldDue = review.dueDate || null, oldSource = review.dueSource || '';
+  if (oldDue === dueDate && oldSource === source) return review;
+  const parts = [oldDue === dueDate ? `Due ${dueDate}` : `Due ${oldDue || '(none)'} → ${dueDate}`];
+  if (oldSource !== source) parts.push(`source: ${oldSource || '(none)'} → ${source || '(none)'}`);
+  else if (source) parts.push(`source: ${source}`);
+  return {
+    ...review, dueDate, dueSource: source,
+    history: [...(review.history || []), entry('due', { oldDue, newDue: dueDate, oldSource, newSource: source, note: parts.join('; ') })],
+  };
+}
+
 /** Due-date state for display. */
 export function dueState(review) {
   if (!review?.dueDate || review.stage === 'closed' || review.stage === 'resubmit') return { kind: 'none', text: '' };
@@ -136,8 +247,9 @@ export function dueState(review) {
 
 export function stageLabel(review, project) {
   if (!review) return 'Not in review';
-  if (review.stage === 'closed') return review.category ? `Closed · Cat ${review.category}` : 'Closed';
-  if (review.stage === 'resubmit') return `Cat ${review.category} · awaiting resubmission`;
+  const wf = project?.workflow;
+  if (review.stage === 'closed') return review.category ? `Closed · ${categoryText(review.category, wf)}` : 'Closed';
+  if (review.stage === 'resubmit') return `${categoryText(review.category, wf)} · awaiting resubmission`;
   return project ? stageName(project, review.stage) : (STAGE[review.stage]?.label || review.stage);
 }
 

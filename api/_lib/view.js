@@ -37,8 +37,12 @@ function drawingForExternal(d) {
     activity: (d.activity || []).filter(e => !hidden(e)),
     crsData: null, crsFileName: null, crsLayout: null, crsRowMap: {}, crsClearRows: [],
   };
-  // before issue, rows read from the working Excel are TranzEnergy's own
-  if (d.review && PRE_ISSUE.has(d.review.stage)) out.crsImported = out.crsImported.filter(c => c.local);
+  // before issue, rows read from the working Excel are TranzEnergy's own, and so is the
+  // category we propose (it reaches the consultant on the issued sheet)
+  if (d.review && PRE_ISSUE.has(d.review.stage)) {
+    out.crsImported = out.crsImported.filter(c => c.local);
+    out.review = { ...d.review, proposedCategory: null, history: (d.review.history || []).filter(h => h?.action !== 'proposed') };
+  }
   return out;
 }
 
@@ -189,7 +193,9 @@ function mergeReview(sd, out, inc, user, project, newRevision) {
   // the one move a consultant makes: forward the CRS to the client (step 7)
   const ok = canActOnStage(user, project, s.stage) && s.stage === 'consultant' && NEXT_STAGE[s.stage] === i.stage;
   if (!ok) return s;
-  // the history entry is written here; only the consultant's note comes from the browser
+  // Everything else is the stored review: our proposed category, the due date and its
+  // source, the client's category are never taken from a consultant's save.
+  // The history entry is written here; only the consultant's note comes from the browser.
   const known = new Set((s.history || []).map(h => h?.id));
   const theirs = (Array.isArray(i.history) ? i.history : []).filter(h => h?.id && !known.has(h.id)).pop();
   return { ...s, stage: i.stage,

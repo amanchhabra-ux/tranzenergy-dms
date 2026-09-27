@@ -66,4 +66,16 @@ const wbXml = await (await JSZip.loadAsync(out.bytes)).file('xl/workbook.xml').a
 assert.match(wbXml, /fullCalcOnLoad="1"/); console.log('  ok - full recalculation on load (F3, C4 formulas)');
 const dv = Object.values(ws.dataValidations?.model || {}).filter(d => d.type === 'list');
 assert.ok(dv.length > 0); console.log(`  ok - ${dv.length} list validation(s) restored (Review Status dropdown)`);
+// the same sheet from a project that sets the AEL category list instead of categoryFormat
+{
+  const { AEL_CATEGORIES } = await import('../src/utils/workflow.js');
+  const wf = { ...project.workflow, categoryFormat: '', categories: AEL_CATEGORIES };
+  for (const [key, want] of [['3', 'Category-3'], ['2*', 'Category-2*'], ['4A', 'Category-4A']]) {
+    const o = await buildIssuedCrs({ ...published, review: { proposedCategory: key } }, { ...project, workflow: wf });
+    const b = new ExcelJS.Workbook();
+    await b.xlsx.load(o.bytes.buffer.slice(o.bytes.byteOffset, o.bytes.byteOffset + o.bytes.byteLength));
+    assert.equal(b.worksheets[0].getCell('C3').value, want, `C3 for proposed ${key}`);
+  }
+  console.log('  ok - C3 = review status from the project category list (Category-3, Category-2*, Category-4A)');
+}
 console.log('All CRS template checks passed.');

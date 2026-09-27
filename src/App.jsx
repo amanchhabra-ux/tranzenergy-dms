@@ -1,6 +1,5 @@
 import React, { useContext } from 'react';
 import { AppContext, AppProvider } from './AppContext';
-import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { ProjectView } from './components/ProjectView';
@@ -64,7 +63,8 @@ function AppShell() {
     if (accessDenied) return <AccessDenied email={accessDenied.email} onSignOut={onSignOut} />;
     if (!currentUser) return <Splash text="Opening your workspace…" />;
   }
-  if (!currentUser) return <Login />;
+  // every sign-in is handled by the server ('password' or 'clerk'); there is no client-side login
+  if (!currentUser) return <Splash text="Opening your workspace…" />;
 
   const navigateTo = (view, projectId = null, drawingId = null) => {
     setNavOpen(false);
