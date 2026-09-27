@@ -2046,3 +2046,6 @@ body.dms-focus .revision-timeline > .comments-toggle { display: inline-flex !imp
 .wf-cats td:nth-child(3) .form-input { width: 100%; }
 .tracker-table tbody tr.tracker-overdue { background: var(--error-glow); box-shadow: inset 3px 0 0 var(--error); }
 .tracker-table tbody tr.tracker-overdue:hover { background: #fde2e2; }
+
+/* Admin panel: server configuration warning */
+.admin-warning { margin: 10px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px; background: var(--error-glow); color: var(--error); border: 1px solid #fecaca; }

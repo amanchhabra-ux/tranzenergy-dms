@@ -1095,6 +1095,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
       // Auth
       login, logout,
+      // server configuration problems an admin should see (e.g. 'session_secret'), from /api/me
+      serverWarnings: me?.warnings || [],
       // Permissions
       canDo,
       // Projects

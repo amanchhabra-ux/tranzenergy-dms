@@ -1,7 +1,9 @@
-import { signedInUser, clerkEnabled } from './_lib/auth.js';
+import { signedInUser, clerkEnabled, adminEmails } from './_lib/auth.js';
+import { sessionSecretMissing } from './_lib/session.js';
 import { memberMap } from './_lib/state.js';
 
-// → { mode, signedIn, email, mustChangePassword, isMember, role }
+// → { mode, signedIn, email, mustChangePassword, isMember, role, warnings? }
+// warnings (admins only): server configuration an admin should fix, e.g. 'session_secret'
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const mode = clerkEnabled() ? 'clerk' : 'password';
@@ -13,5 +15,6 @@ export default async function handler(req, res) {
     mode, authEnabled: true, signedIn: true, email: who.email, name: who.name || user?.name,
     mustChangePassword: !!who.mustChangePassword, isMember: !!user, role: user?.role || null,
     isAdminEmail: user?.role === 'Admin',
+    ...((user?.role === 'Admin' || adminEmails().has(who.email)) && sessionSecretMissing() ? { warnings: ['session_secret'] } : {}),
   });
 }

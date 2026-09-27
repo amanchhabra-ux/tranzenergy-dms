@@ -16,7 +16,7 @@ const ROLE_COLORS = {
 const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings, serverWarnings = [] } = useContext(AppContext);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -184,6 +184,13 @@ export function AdminPanel({ initialTab = 'users' }) {
           </button>
         )}
       </div>
+
+      {serverWarnings.includes('session_secret') && (
+        <div className="admin-warning" role="alert">
+          <strong>SESSION_SECRET is not set in Vercel.</strong> Sign-in cookies are signed with the storage key instead.
+          Add a long random SESSION_SECRET to the project's environment variables and redeploy; everyone is signed out once.
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="tab-bar">

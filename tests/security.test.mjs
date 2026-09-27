@@ -646,6 +646,120 @@ await test('consultant new revision: due date and source set by the server ("pro
   assert.equal(rv.dueSource, 'project default');
 });
 
+// ── PR 4: first admin password without a public password ───────────────────────
+const auth = (await import('../api/auth.js')).default;
+const { hashPassword } = await import('../api/_lib/creds.js');
+const credsFile = path.join(dir, 'auth_credentials.json');
+const setCreds = (users) => { fs.writeFileSync(credsFile, JSON.stringify({ users })); forgetMembers(); };
+const login = async (email, password) => {
+  const res = mockRes();
+  await auth({ method: 'POST', headers: { host: 'localhost' }, body: { action: 'login', email, password } }, res);
+  return res;
+};
+async function withEnv(vars, fn) {
+  const keep = Object.fromEntries(Object.keys(vars).map(k => [k, process.env[k]]));
+  Object.entries(vars).forEach(([k, v]) => (v == null ? delete process.env[k] : (process.env[k] = v)));
+  try { return await fn(); } finally { Object.entries(keep).forEach(([k, v]) => (v == null ? delete process.env[k] : (process.env[k] = v))); }
+}
+
+await test('the old public password admin123 no longer signs anyone in', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'admin123')).statusCode, 401);
+  });
+});
+
+await test('existing admin with a password: unaffected; no bootstrap even with the token', async () => {
+  seed(baseState());
+  setCreds({ [EMAIL.u1]: { ...hashPassword('Correct-horse-9'), pwv: 3 } });
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: 'tok-123456789' }, async () => {
+    const ok = await login(EMAIL.u1, 'Correct-horse-9');
+    assert.equal(ok.statusCode, 200);
+    assert.ok(!ok.body.mustChangePassword);
+    assert.equal((await login(EMAIL.u1, 'tok-123456789')).statusCode, 401);
+    assert.equal((await login(EMAIL.u1, 'admin123')).statusCode, 401);
+    // another admin-listed email without a password cannot bootstrap either
+    process.env.ADMIN_EMAILS = `${EMAIL.u1},new-admin@tranzenergy.in`;
+    assert.equal((await login('new-admin@tranzenergy.in', 'tok-123456789')).statusCode, 401);
+    assert.equal((await login('new-admin@tranzenergy.in', 'anything-at-all')).statusCode, 401);
+  });
+});
+
+await test('bootstrap without the token: refused for an email not in ADMIN_EMAILS', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: 'someone-else@tranzenergy.in', ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401, 'Admin by role, not in ADMIN_EMAILS');
+    assert.equal((await login(EMAIL.u2, 'whatever-123')).statusCode, 401, 'not an admin');
+  });
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401, 'ADMIN_EMAILS unset');
+  });
+});
+
+await test('bootstrap without the token: refused once any workspace user has a password', async () => {
+  seed(baseState());
+  setCreds({ [EMAIL.u2]: { ...hashPassword('Pm-password-77'), pwv: 1 } });
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401);
+  });
+});
+
+await test('bootstrap without the token, brand-new deployment: ADMIN_EMAILS admin sets the first password once', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    const r = await login(EMAIL.u1, 'first-time');
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.body.mustChangePassword, true);
+    const cookie = String(r.headers['Set-Cookie']).split(';')[0];
+    // the setup session opens nothing but the password change
+    const blocked = mockRes();
+    await saveState({ method: 'POST', headers: { cookie, host: 'localhost' }, body: { state: baseState(), etag: null } }, blocked);
+    assert.equal(blocked.statusCode, 403);
+    const change = async () => { const res = mockRes(); await auth({ method: 'POST', headers: { cookie, host: 'localhost' }, body: { action: 'change-password', newPassword: 'A-real-password-42' } }, res); return res; };
+    assert.equal((await change()).statusCode, 200);
+    assert.equal((await change()).statusCode, 401, 'the setup session is spent once a password exists');
+    assert.equal((await login(EMAIL.u1, 'A-real-password-42')).statusCode, 200);
+    assert.equal((await login(EMAIL.u1, 'first-time')).statusCode, 401);
+  });
+});
+
+await test('bootstrap with ADMIN_BOOTSTRAP_TOKEN: only the token, only for an admin', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: 'tok-123456789' }, async () => {
+    assert.equal((await login(EMAIL.u1, 'wrong-token')).statusCode, 401);
+    assert.equal((await login(EMAIL.u1, '')).statusCode, 401);
+    assert.equal((await login(EMAIL.u2, 'tok-123456789')).statusCode, 401, 'not an admin');
+    assert.equal((await login(EMAIL.u7, 'tok-123456789')).statusCode, 401, 'consultant');
+    const r = await login(EMAIL.u1, 'tok-123456789');
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.body.mustChangePassword, true);
+  });
+});
+
+await test('SESSION_SECRET unset with a storage key: flagged to admins by /api/me, sign-in still works', async () => {
+  seed(baseState());
+  const me = (await import('../api/me.js')).default;
+  const { sessionSecretMissing } = await import('../api/_lib/session.js');
+  const warn = console.warn; console.warn = () => {};
+  try {
+    await withEnv({ SESSION_SECRET: null, R2_SECRET_ACCESS_KEY: 'r2-secret' }, async () => {
+      assert.equal(sessionSecretMissing(), true);
+      const get = async (email) => { const res = mockRes(); await me({ method: 'GET', headers: { cookie: makeSessionCookie(email, { secure: false }).split(';')[0], host: 'localhost' } }, res); return res.body; };
+      const a = await get(EMAIL.u1);
+      assert.equal(a.signedIn, true);
+      assert.deepEqual(a.warnings, ['session_secret']);
+      assert.equal((await get(EMAIL.u2)).warnings, undefined, 'not shown to non-admins');
+    });
+    await withEnv({ SESSION_SECRET: 'a-long-random-secret', R2_SECRET_ACCESS_KEY: 'r2-secret' }, async () => {
+      assert.equal(sessionSecretMissing(), false);
+    });
+  } finally { console.warn = warn; }
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });
