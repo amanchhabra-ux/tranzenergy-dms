@@ -321,51 +321,59 @@ await test('consultant new drawing with an internal comment, forged author and a
   assert.equal(d.review.note.text, 'First issue');
 });
 
-// ── Finding 4: server time on log and activity entries; the cap is 5000 ─────────
-await test('250 future-dated log entries from a consultant -> real entries kept, times server-stamped', async () => {
-  seed(baseState());
+// ── Finding 4: the log is out of the document; server time and author on every entry ──
+// (the full tests are in tests/log.test.mjs; these cover a save from a tab of the old app)
+const { readPage, LOG_DIR, activityDir } = await import('../api/_lib/log.js');
+const logObjects = async () => (await readPage({ dir: LOG_DIR, limit: 1000 })).entries;
+const activityObjects = async (id) => (await readPage({ dir: activityDir(id), limit: 1000 })).entries;
+const clearObjects = () => fs.rmSync(path.join(dir, 'objects'), { recursive: true, force: true });
+
+await test('old tab: 250 future-dated log entries from a consultant -> 100 stored with server time, document unchanged', async () => {
+  seed(baseState()); clearObjects();
   const v = viewOf('u7');
+  v.activityLog = [];
   for (let i = 0; i < 250; i++) v.activityLog.push({ id: `spam${i}`, message: 'x', author: 'Atlanta Engineer', authorId: 'u7', time: '2099-01-01T00:00:00.000Z' });
   assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
-  const log = stored().activityLog;
-  assert.ok(log.some(l => l.id === 'l1') && log.some(l => l.id === 'l2'), 'real entries evicted');
-  const spam = log.filter(l => l.id.startsWith('spam'));
+  assert.deepEqual(stored().activityLog.map(l => l.id), ['l1', 'l2'], 'document log changed');
+  const spam = (await logObjects()).filter(l => l.id.startsWith('spam'));
   assert.equal(spam.length, 100);
   assert.ok(spam.every(l => recent(l.time)), 'client time kept');
 });
 
-await test('internal save: new log entry gets server time, stored entries keep theirs', async () => {
-  seed(baseState());
+await test('old tab, internal save: new log entry stored with server time, stored entries keep theirs', async () => {
+  seed(baseState()); clearObjects();
   const s = baseState();
   s.activityLog[0].time = '2099-01-01T00:00:00.000Z';
   s.activityLog.unshift({ id: 'l3', message: 'new', author: 'Viewer', authorId: 'u5', time: '2099-01-01T00:00:00.000Z' });
   assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 200);
   const log = stored().activityLog;
-  assert.ok(recent(log.find(l => l.id === 'l3').time));
   assert.equal(log.find(l => l.id === 'l1').time, '2026-09-20T10:00:00.000Z');
+  assert.ok(!log.some(l => l.id === 'l3'), 'new entry went into the document');
+  assert.ok(recent((await logObjects()).find(l => l.id === 'l3').time));
 });
 
-await test('drawing activity: consultant entries server-stamped, future dates cannot evict', async () => {
+await test('old tab: consultant drawing activity stored server-stamped, 100 per save, never in the document', async () => {
   const s = baseState();
   s.drawings[0].activity = [{ id: 'a1', type: 'upload', at: '2026-09-20T10:00:00.000Z', by: 'u2', byName: 'Project Manager' }];
-  seed(s);
+  seed(s); clearObjects();
   const v = viewOf('u7');
   const d = v.drawings.find(x => x.id === 'd1');
+  d.activity = [];
   for (let i = 0; i < 250; i++) d.activity.push({ id: `act${i}`, type: 'download', at: '2099-01-01T00:00:00.000Z', by: 'u7', byName: 'Aman Chhabra' });
   assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
-  const act = stored().drawings.find(x => x.id === 'd1').activity;
-  assert.ok(act.some(e => e.id === 'a1'));
-  const mine = act.filter(e => e.id.startsWith('act'));
+  assert.deepEqual(stored().drawings.find(x => x.id === 'd1').activity.map(e => e.id), ['a1']);
+  const mine = (await activityObjects('d1')).filter(e => e.id.startsWith('act'));
   assert.equal(mine.length, 100);
   assert.ok(mine.every(e => recent(e.at) && e.byName === 'Atlanta Engineer'));
 });
 
-await test('internal save: new drawing activity entry gets server time', async () => {
-  seed(baseState());
+await test('old tab, internal save: new drawing activity entry stored with server time', async () => {
+  seed(baseState()); clearObjects();
   const s = baseState();
   s.drawings[0].activity = [{ id: 'a2', type: 'download', at: '2099-01-01T00:00:00.000Z', by: 'u5', byName: 'Viewer' }];
   assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 200);
-  assert.ok(recent(stored().drawings[0].activity[0].at));
+  assert.equal(stored().drawings[0].activity, undefined);
+  assert.ok(recent((await activityObjects('d1'))[0].at));
 });
 
 // ── Finding 6: a consultant's comment is deleted only on an explicit marker ─────
@@ -410,6 +418,12 @@ await test('consultant editing TE\'s reply inside their own pin -> reply unchang
 });
 
 // ── Finding 7: log entries attributed by user id ─────────────────────────────
+const getState = (await import('../api/get-state.js')).default;
+const getLog = async (email) => {
+  const res = mockRes();
+  await getState({ method: 'GET', headers: request(email).headers, query: { route: 'log', limit: '100' } }, res);
+  return res;
+};
 await test('log entries matched by authorId, by name only for old entries', async () => {
   const s = baseState();
   s.activityLog.push(
@@ -417,13 +431,18 @@ await test('log entries matched by authorId, by name only for old entries', asyn
     { id: 'm2', message: 'same name, other user', author: 'Atlanta Engineer', authorId: 'u2', time: '2026-09-22T11:00:00.000Z' },
     { id: 'm3', message: 'old entry', author: 'Atlanta Engineer', time: '2026-09-22T12:00:00.000Z' },
   );
-  seed(s);
+  seed(s); clearObjects();
+  // what the consultant reads: their own entries (still inside the document here)
+  const r = await getLog(EMAIL.u7);
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(r.body.entries.map(l => l.id).sort(), ['m1', 'm3']);
   const v = viewOf('u7');
-  assert.deepEqual(v.activityLog.map(l => l.id).sort(), ['m1', 'm3']);
-  v.activityLog.push({ id: 'm4', message: 'as someone else', author: 'Atlanta Engineer', authorId: 'u1', time: '2026-09-26T00:00:00.000Z' });
-  v.activityLog.push({ id: 'm5', message: 'mine', author: 'Aman Chhabra', authorId: 'u7', time: '2026-09-26T00:00:00.000Z' });
+  v.activityLog = [
+    { id: 'm4', message: 'as someone else', author: 'Atlanta Engineer', authorId: 'u1', time: new Date().toISOString() },
+    { id: 'm5', message: 'mine', author: 'Aman Chhabra', authorId: 'u7', time: new Date().toISOString() },
+  ];
   assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
-  const log = stored().activityLog;
+  const log = await logObjects();
   assert.ok(!log.some(l => l.id === 'm4'));
   assert.equal(log.find(l => l.id === 'm5').author, 'Atlanta Engineer');
 });

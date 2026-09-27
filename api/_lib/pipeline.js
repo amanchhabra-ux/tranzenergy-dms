@@ -9,7 +9,6 @@ import crypto from 'node:crypto';
 import { workflowOn, newReviewFor, isExternal } from '../../src/utils/workflow.js';
 import { normCode, proposeDiscipline, nextRevision } from '../../src/utils/mdl.js';
 import { buildCrsTable, crsFieldUpdates, pinRowMapFromImport } from '../../src/utils/crs.js';
-import { LOG_CAP, ACTIVITY_CAP } from './view.js';
 
 export const VIA = 'pipeline';
 // the Vercel request body limit is 4.5 MB; base64 adds a third, so inline files stop at 3 MB
@@ -132,24 +131,25 @@ function actor(user, now) {
     log: (message) => ({ id: uid('log'), message, author: user.name, authorId: user.id, time: now, via: VIA }),
   };
 }
-const withActivity = (d, e) => ({ ...d, activity: [...(d.activity || []), e].slice(-ACTIVITY_CAP) });
 const versionDate = (now) => now.replace('T', ' ').slice(0, 16);
 
-/** The workspace with one drawing replaced (or added first) and one log entry. */
-function commitDrawing(state, drawing, logEntry, { isNew = false } = {}) {
+/** The workspace with one drawing replaced (or added first). */
+function commitDrawing(state, drawing, { isNew = false } = {}) {
   return {
     ...state,
     drawings: isNew ? [drawing, ...(state.drawings || [])] : (state.drawings || []).map(d => (d.id === drawing.id ? drawing : d)),
-    activityLog: [logEntry, ...(state.activityLog || [])].slice(0, LOG_CAP),
   };
 }
+// The log and activity entries of a change: stored as objects once the document is written
+// (appendEntry in api/_lib/log.js), never inside the document.
+const entriesFor = (drawing, activity, log) => ({ log: [log], activity: [{ drawingId: String(drawing.id), entry: { ...activity, drawingId: String(drawing.id) } }] });
 
 /**
  * Register a received document (the file is already stored at fileUrl).
  *  - no record with the code: a new drawing, review started (createDrawing)
  *  - an expected MDL record: its first revision (R0 unless given), review started, expected=false
  *  - a received drawing: a new revision only when `revision` is given and new (uploadRevision)
- * → { state, drawing, outcome: 'created' | 'filled' | 'revision', version }
+ * → { state, drawing, outcome: 'created' | 'filled' | 'revision', version, entries }
  */
 export function applyRegister(state, { who, project, code, title, revision, fileUrl, fileName, now = new Date().toISOString() }) {
   const user = who.user;
@@ -168,10 +168,11 @@ export function applyRegister(state, { who, project, code, title, revision, file
       versions: [{ version, date: versionDate(now), author: user.name, changeSummary: `Initial issue (${note}).`, pdfData: fileUrl }],
       pins: [],
     };
-    const started = start(withActivity(d, ev('upload', { what: 'drawing', version })), null);
+    const started = start(d, null);
     return {
-      state: commitDrawing(state, started, log(`Drawing <strong>${esc(k)}</strong> registered by <strong>${esc(user.name)}</strong> via pipeline.`), { isNew: true }),
+      state: commitDrawing(state, started, { isNew: true }),
       drawing: started, outcome: 'created', version,
+      entries: entriesFor(started, ev('upload', { what: 'drawing', version }), log(`Drawing <strong>${esc(k)}</strong> registered by <strong>${esc(user.name)}</strong> via pipeline.`)),
     };
   }
 
@@ -192,17 +193,20 @@ export function applyRegister(state, { who, project, code, title, revision, file
     pdfData: fileUrl,
     versions: [{ version, date: versionDate(now), author: user.name, changeSummary: summary, pdfData: fileUrl }, ...(existing.versions || [])],
   };
-  const started = start(withActivity(next, ev('upload', { what: 'revision', version, note: snippet(summary) })), existing.review);
+  const started = start(next, existing.review);
   const message = expected
     ? `<strong>${esc(user.name)}</strong> uploaded <strong>${esc(existing.code)}</strong> ${esc(version)} via pipeline: first file received for this MDL record.`
     : `<strong>${esc(user.name)}</strong> uploaded <strong>${esc(version)}</strong> of <strong>${esc(existing.code)}</strong> via pipeline.`;
-  return { state: commitDrawing(state, started, log(message)), drawing: started, outcome: expected ? 'filled' : 'revision', version };
+  return {
+    state: commitDrawing(state, started), drawing: started, outcome: expected ? 'filled' : 'revision', version,
+    entries: entriesFor(started, ev('upload', { what: 'revision', version, note: snippet(summary) }), log(message)),
+  };
 }
 
 /**
  * Attach a CRS Excel (already stored at crsUrl, parsed with readCrs) to a drawing's current
  * revision, only when the drawing has no sheet yet (uploadCRS in src/AppContext.jsx).
- * → { state, drawing, rows }
+ * → { state, drawing, rows, entries }
  */
 export function applyAttachCrs(state, { who, project, code, crsUrl, fileName, parsed, now = new Date().toISOString() }) {
   const user = who.user;
@@ -214,7 +218,7 @@ export function applyAttachCrs(state, { who, project, code, crsUrl, fileName, pa
   if (sheet.present) fail(409, 'sheet_present', { code: d.code, rows: sheet.rows, fileName: sheet.fileName });
   if (!parsed || parsed.fileType !== 'excel') fail(400, 'not_excel', { fileType: parsed?.fileType || null });
   const comments = parsed.comments || [];
-  const next = withActivity({
+  const next = {
     ...d,
     ...crsFieldUpdates(d, parsed.meta || {}),
     crsData: crsUrl,
@@ -225,10 +229,11 @@ export function applyAttachCrs(state, { who, project, code, crsUrl, fileName, pa
     crsRowMap: pinRowMapFromImport(d, comments),
     crsFileName: fileName || d.crsFileName || null,
     crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
-  }, ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion }));
+  };
   return {
-    state: commitDrawing(state, next, log(`CRS uploaded for <strong>${esc(d.code)}</strong> via pipeline.`)),
+    state: commitDrawing(state, next),
     drawing: next, rows: comments.length,
+    entries: entriesFor(next, ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion }), log(`CRS uploaded for <strong>${esc(d.code)}</strong> via pipeline.`)),
   };
 }
 

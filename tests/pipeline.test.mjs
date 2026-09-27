@@ -21,6 +21,10 @@ const { PreconditionFailed } = await import('../api/_lib/r2.js');
 const { readCrs } = await import('../src/utils/crs.js');
 const { addDays, today } = await import('../src/utils/workflow.js');
 const pipeline = (await import('../api/pipeline/[action].js')).default;
+const { readPage, activityDir, LOG_DIR } = await import('../api/_lib/log.js');
+// log and activity entries are objects (api/_lib/log.js), newest first
+const activityOf = async (id) => (await readPage({ dir: activityDir(id), limit: 50 })).entries;
+const logEntries = async () => (await readPage({ dir: LOG_DIR, limit: 50 })).entries;
 
 const AEL_DEFAULT = 'C:/Users/Jacopo Licheri/Documents/Lavoro/Tranzenergy IN/Offers/TE-002 OE RPCL Madarganj/Submissions/2026-09-24/RPCL100MW-ARIPL-PSS-ELE-RPT-024/CRS-RPCL100MW-ARIPL-PSS-ELE-RPT-024 rev 00 AEL 26.09.2026.xlsx';
 const AEL = process.argv[2] || AEL_DEFAULT;
@@ -213,8 +217,14 @@ await withEnv(on, async () => {
     assert.equal(d.review.dueSource, 'project default');
     const h = d.review.history.at(-1);
     assert.equal(h.action, 'registered'); assert.equal(h.by, 'u3'); assert.equal(h.via, 'pipeline');
-    assert.equal(d.activity.at(-1).by, 'u3'); assert.equal(d.activity.at(-1).via, 'pipeline');
-    assert.equal(after.activityLog[0].authorId, 'u3'); assert.match(after.activityLog[0].message, /via pipeline/);
+    const act = (await activityOf('d1'))[0];
+    assert.equal(act.by, 'u3'); assert.equal(act.via, 'pipeline');
+    assert.equal(act.version, 'R0'); assert.equal(act.drawingId, 'd1');
+    const log = (await logEntries())[0];
+    assert.equal(log.authorId, 'u3'); assert.match(log.message, /via pipeline/);
+    // the document does not grow: no activity on the record, the stored log unchanged
+    assert.equal(d.activity, undefined);
+    assert.deepEqual(after.activityLog, before.activityLog);
     assert.ok(d.pdfData.startsWith('/local-files/drawings/RPCL100MW-ARIPL-PSS-ELE-RPT-024/'), d.pdfData);
     assert.ok(fs.existsSync(path.join(dir, 'files', ...decodeURIComponent(d.pdfData.slice('/local-files/'.length)).split('/'))), 'file stored');
     othersSame(before, after, 'd1');
@@ -326,7 +336,8 @@ await withEnv(on, async () => {
     assert.equal(d.crsFileType, 'excel'); assert.equal(d.crsFileName, path.basename(AEL));
     assert.ok(d.crsData.startsWith('/local-files/crs/RPCL100MW-ARIPL-PSS-ELE-RPT-024/'));
     assert.equal(d.review.stage, 'ir1', 'stage unchanged');
-    assert.equal(d.activity.at(-1).what, 'crs'); assert.equal(d.activity.at(-1).by, 'u3');
+    const act = (await activityOf(d.id))[0];
+    assert.equal(act.what, 'crs'); assert.equal(act.by, 'u3');
     othersSame(before, stored(), 'd1');
     console.log(`      ${want.comments.length} rows, header row ${want.layout?.headerIdx}, from ${fs.existsSync(AEL) ? path.basename(AEL) : 'generated sheet'}`);
     // and never a second time

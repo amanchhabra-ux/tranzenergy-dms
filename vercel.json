@@ -1,3 +1,8 @@
 {
-  "name": "tranzenergy-dms"
+  "name": "tranzenergy-dms",
+  "rewrites": [
+    { "source": "/api/log", "destination": "/api/get-state?route=log" },
+    { "source": "/api/activity", "destination": "/api/get-state?route=activity" },
+    { "source": "/api/admin/migrate-log", "destination": "/api/get-state?route=migrate" }
+  ]
 }
