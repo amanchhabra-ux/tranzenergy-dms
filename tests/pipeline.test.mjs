@@ -1,5 +1,5 @@
 // Tests for the pipeline API (api/pipeline/[action].js, api/_lib/pipeline.js). Plain node:
-//   node tests/pipeline.test.mjs ["<a CRS Excel in the AEL template>"]
+//   node tests/pipeline.test.mjs ["<a CRS Excel in the AEL template>"] ["<the AEL template>"]
 // Runs the real handler in local mode (LOCAL_DATA_DIR = a temp folder, never .local-data).
 // The AEL sample defaults to a TE-002 sheet; when it is not on this machine a small generated
 // sheet is used instead and the run says so.
@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dms-pipeline-'));
 process.env.LOCAL_DATA_DIR = dir;
@@ -18,7 +19,8 @@ console.log = ((log) => (...a) => { if (!String(a[0]).startsWith('[notify]')) lo
 const { forgetMembers, writeState, readState } = await import('../api/_lib/state.js');
 const { commitChange, PipelineError } = await import('../api/_lib/pipeline.js');
 const { PreconditionFailed } = await import('../api/_lib/r2.js');
-const { readCrs } = await import('../src/utils/crs.js');
+const { readCrs, buildCrsTable, buildIssuedCrs } = await import('../src/utils/crs.js');
+const { externalView } = await import('../api/_lib/view.js');
 const { addDays, today } = await import('../src/utils/workflow.js');
 const pipeline = (await import('../api/pipeline/[action].js')).default;
 const { readPage, activityDir, LOG_DIR } = await import('../api/_lib/log.js');
@@ -28,6 +30,7 @@ const logEntries = async () => (await readPage({ dir: LOG_DIR, limit: 50 })).ent
 
 const AEL_DEFAULT = 'C:/Users/Jacopo Licheri/Documents/Lavoro/Tranzenergy IN/Offers/TE-002 OE RPCL Madarganj/Submissions/2026-09-24/RPCL100MW-ARIPL-PSS-ELE-RPT-024/CRS-RPCL100MW-ARIPL-PSS-ELE-RPT-024 rev 00 AEL 26.09.2026.xlsx';
 const AEL = process.argv[2] || AEL_DEFAULT;
+const AEL_TEMPLATE = process.argv[3] || 'C:/Users/Jacopo Licheri/Documents/Lavoro/Tranzenergy IN/Offers/TE-002 OE RPCL Madarganj/Templates/CRS template AEL clean.xlsx';
 
 const TOKEN = 'test-token-0123456789abcdefghijklmnopqrstuvwxyz';
 const USERS = [
@@ -112,8 +115,8 @@ const othersSame = (before, after, changedId) => {
 // ── Authentication ────────────────────────────────────────────────────────────
 await test('PIPELINE_TOKEN unset -> 404 on every route', async () => {
   seed(baseState());
-  for (const a of ['drawings', 'register', 'attach-crs', 'upload-url']) {
-    const r = await call(a, { method: a === 'drawings' ? 'GET' : 'POST', body: {} });
+  for (const a of ['drawings', 'comments', 'register', 'attach-crs', 'upload-url', 'append-rows']) {
+    const r = await call(a, { method: ['drawings', 'comments'].includes(a) ? 'GET' : 'POST', body: {} });
     assert.equal(r.statusCode, 404, a);
   }
 });
@@ -348,6 +351,184 @@ await withEnv(on, async () => {
     seed(baseState());
     const r = await call('attach-crs', { body: { project: 'TE-002', code: 'RPCL100MW-ARIPL-PVP-CIV-DWG-006A', fileName: 'crs.xlsx', contentBase64: PDF() } });
     assert.equal(r.statusCode, 400); assert.equal(r.body.error, 'not_an_excel');
+  });
+});
+
+// ── Comments: read a drawing's CRS rows, append ours after the local engineer's ──
+const ENG1 = { id: 'u4', name: 'TE Engineer 1', email: 'eng1@tranzenergy.in', role: 'Engineer' };
+const HIS = ['Earthing conductor size not matching the calculation.', 'Show the cable tray section at the crossing.'];
+const hisRow = (id, text, page) => ({ id, local: true, comment: text, commentBy: ENG1.name, date: '2026-09-26', page, reply: '', status: 'Open', authorId: 'u4', stage: 'ir1', cycle: 1, vis: 'internal' });
+function commentState({ stage = 'ir2' } = {}) {
+  const s = baseState();
+  s.users.push(structuredClone(ENG1));
+  s.projects[0].assignedUsers.push('u4');
+  s.projects[0].workflow.firstReviewers = ['u4'];
+  // his two rows added in the CRS panel, review marked done (ir1 → ir2)
+  s.drawings.push({ id: 'd5', code: 'RPCL100MW-ARIPL-PSS-ELE-DWG-030', title: 'Switchyard earthing layout', projectId: 'p1', discipline: 'Electrical',
+    currentVersion: 'R0', pdfData: FILE('drawings/D30/1_r0.pdf'), crsData: null, versions: [{ version: 'R0', pdfData: FILE('drawings/D30/1_r0.pdf') }],
+    pins: [], crsImported: [hisRow('crs-his-1', HIS[0], '2'), hisRow('crs-his-2', HIS[1], '')], crsRev: 3, crsSyncedRev: 3,
+    review: { cycle: 1, version: 'R0', stage, startedAt: '2026-09-24', dueDate: '2026-10-04', history: [], cycles: [] } });
+  // a pin by him, an Excel row, a panel row by Jacopo
+  s.drawings.push({ id: 'd6', code: 'RPCL100MW-ARIPL-PSS-ELE-DWG-031', title: 'SLD', projectId: 'p1', discipline: 'Electrical',
+    currentVersion: 'R1', pdfData: FILE('drawings/D31/1_r1.pdf'), crsData: FILE('crs/D31/1_crs.xlsx'), versions: [{ version: 'R1' }],
+    pins: [{ id: 'pin-1', label: 1, page: 3, x: 0.1, y: 0.2, authorId: 'u4', vis: 'internal',
+      comments: [{ id: 'c1', author: ENG1.name, authorId: 'u4', text: 'Breaker rating missing.', date: '2026-09-25 10:00', type: 'internal', vis: 'internal' },
+        { id: 'c2', author: 'Jacopo Licheri', authorId: 'u3', text: 'Agreed.', date: '2026-09-25 11:00', type: 'internal', vis: 'internal' }] }],
+    crsImported: [{ row: 5, sno: '1', comment: 'Uploaded sheet row', commentBy: 'AEL', status: 'Open' },
+      { id: 'crs-j', local: true, comment: 'Panel row by Jacopo', commentBy: 'Jacopo Licheri', authorId: 'u3', date: '2026-09-26', status: 'Open', vis: 'internal' }],
+    review: { cycle: 1, version: 'R1', stage: 'ir1', history: [], cycles: [] } });
+  return s;
+}
+const comments = (code, project = 'TE-002') => call('comments', { method: 'GET', query: { project, code } });
+const append = (code, rows, extra = {}) => call('append-rows', { body: { project: 'TE-002', code, rows, ...extra } });
+const OURS = [{ text: 'Earthing grid spacing to be justified against IEEE 80 step voltage.', section: '4.2', topic: 'Earthing' }, { text: 'Conductor material to be stated.', page: 3 }];
+
+await withEnv(on, async () => {
+  await test('comments returns pins and CRS rows in buildCrsTable order, with authors and roles', async () => {
+    seed(commentState());
+    const r = await comments('rpcl100mw-aripl-pss-ele-dwg-031');
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'RPCL100MW-ARIPL-PSS-ELE-DWG-031'); assert.equal(r.body.drawingId, 'd6');
+    assert.equal(r.body.currentVersion, 'R1'); assert.equal(r.body.stage, 'ir1'); assert.equal(r.body.cycle, 1);
+    const want = buildCrsTable(stored().drawings.find(d => d.id === 'd6'));
+    assert.deepEqual(r.body.rows.map(x => x.text), want.map(x => x.comment));
+    assert.deepEqual(r.body.rows.map(x => x.order), [0, 1, 2]);
+    const [pin, xl, loc] = r.body.rows;
+    assert.deepEqual(pin, { id: 'pin-1', source: 'pin', pin: 1, page: 3, text: 'Breaker rating missing.', author: 'TE Engineer 1', authorId: 'u4', authorRole: 'Engineer',
+      date: '2026-09-25', status: 'Open', reply: 'Agreed.', replyBy: 'Jacopo Licheri', vis: 'internal', local: false, order: 0 });
+    assert.equal(xl.source, 'crs'); assert.equal(xl.local, false); assert.equal(xl.author, 'AEL'); assert.equal(xl.authorId, null); assert.equal(xl.authorRole, null); assert.equal(xl.vis, null);
+    assert.equal(loc.id, 'crs-j'); assert.equal(loc.local, true); assert.equal(loc.authorId, 'u3'); assert.equal(loc.authorRole, 'Project Manager'); assert.equal(loc.vis, 'internal');
+  });
+  await test('comments on an unknown drawing -> 404, without a code -> 400', async () => {
+    seed(commentState());
+    const r = await comments('NOPE-1');
+    assert.equal(r.statusCode, 404); assert.equal(r.body.error, 'drawing_not_found');
+    assert.equal((await comments('')).statusCode, 400);
+    assert.equal((await call('comments', { query: { project: 'TE-002', code: 'NOPE-1' } })).statusCode, 405, 'GET only');
+  });
+  await test('append after the local engineer\'s two rows: order [his, his, ours, ours], internal, nothing of his changed', async () => {
+    seed(commentState());
+    const before = stored();
+    const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS);
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    assert.equal(r.body.added, 2); assert.equal(r.body.skipped, 0); assert.equal(r.body.rowIds.length, 2);
+    const d = drawingOf('RPCL100MW-ARIPL-PSS-ELE-DWG-030');
+    const was = before.drawings.find(x => x.id === 'd5');
+    assert.deepEqual(d.crsImported.slice(0, 2), was.crsImported, 'his rows byte-identical and first');
+    assert.deepEqual(d.crsImported.slice(2).map(c => c.id), r.body.rowIds);
+    const ours = d.crsImported[2];
+    assert.equal(ours.local, true); assert.equal(ours.comment, OURS[0].text); assert.equal(ours.commentBy, 'Jacopo Licheri'); assert.equal(ours.authorId, 'u3');
+    assert.equal(ours.vis, 'internal'); assert.equal(ours.status, 'Open'); assert.equal(ours.stage, 'ir2'); assert.equal(ours.via, 'pipeline');
+    assert.equal(ours.section, '4.2'); assert.equal(ours.topic, 'Earthing'); assert.equal(d.crsImported[3].page, '3');
+    assert.equal(d.crsRev, 4, 'crsRev bumped so an internal tab rewrites the working Excel');
+    assert.equal(d.review.stage, 'ir2', 'stage unchanged');
+    const c = await comments('RPCL100MW-ARIPL-PSS-ELE-DWG-030');
+    assert.deepEqual(c.body.rows.map(x => x.author), ['TE Engineer 1', 'TE Engineer 1', 'Jacopo Licheri', 'Jacopo Licheri']);
+    assert.deepEqual(c.body.rows.map(x => x.authorRole), ['Engineer', 'Engineer', 'Project Manager', 'Project Manager']);
+    const acts = await activityOf('d5');
+    assert.equal(acts.length, 2); assert.ok(acts.every(a => a.type === 'comment' && a.via === 'pipeline' && a.vis === 'internal' && a.by === 'u3'));
+    assert.match((await logEntries())[0].message, /added 2 comments to the CRS of <strong>RPCL100MW-ARIPL-PSS-ELE-DWG-030<\/strong> via pipeline/);
+    assert.deepEqual(stored().activityLog, before.activityLog, 'log not in the document');
+    othersSame(before, stored(), 'd5');
+  });
+  await test('a row with the text of an existing row, or of an earlier row in the call, is skipped', async () => {
+    seed(commentState());
+    const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', [
+      { text: '  earthing conductor SIZE not matching the calculation ' },   // his row 1, other case and punctuation
+      { text: 'New point: fence earthing.' },
+      { text: 'new point - fence earthing' },                                 // same as the row before
+    ]);
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    assert.equal(r.body.added, 1); assert.equal(r.body.skipped, 2);
+    assert.equal(drawingOf('RPCL100MW-ARIPL-PSS-ELE-DWG-030').crsImported.length, 3);
+    // all duplicates: nothing written at all
+    const before = raw();
+    const again = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', [{ text: 'NEW POINT: fence earthing!' }]);
+    assert.equal(again.statusCode, 200); assert.equal(again.body.added, 0); assert.equal(again.body.skipped, 1);
+    assert.equal(raw(), before);
+    // a pin's text counts too
+    seed(commentState());
+    const p = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-031', [{ text: 'Breaker rating missing' }]);
+    assert.equal(p.body.added, 0); assert.equal(p.body.skipped, 1);
+  });
+  await test('the same clientKey twice -> one write, the first result returned again', async () => {
+    seed(commentState());
+    const first = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS, { clientKey: 'run-2026-09-27-030' });
+    assert.equal(first.statusCode, 200, JSON.stringify(first.body));
+    const after = raw();
+    const acts = (await activityOf('d5')).length;
+    const d = drawingOf('RPCL100MW-ARIPL-PSS-ELE-DWG-030');
+    assert.deepEqual(d.pipelineAppends.map(a => [a.clientKey, a.rowIds]), [['run-2026-09-27-030', first.body.rowIds]]);
+    const second = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', [...OURS, { text: 'A third one.' }], { clientKey: 'run-2026-09-27-030' });
+    assert.equal(second.statusCode, 200);
+    assert.deepEqual([second.body.added, second.body.skipped, second.body.rowIds], [first.body.added, first.body.skipped, first.body.rowIds]);
+    assert.equal(second.body.replayed, true);
+    assert.equal(raw(), after, 'nothing written the second time');
+    assert.equal((await activityOf('d5')).length, acts, 'no second activity');
+  });
+  await test('stage consultant (issued) -> 409 stage_closed, nothing written; resubmit and closed too', async () => {
+    for (const stage of ['consultant', 'client', 'closed', 'resubmit']) {
+      seed(commentState({ stage }));
+      const before = raw();
+      const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS);
+      assert.equal(r.statusCode, 409, stage); assert.equal(r.body.error, 'stage_closed'); assert.equal(r.body.stage, stage);
+      assert.equal(raw(), before);
+    }
+  });
+  await test('an expected record -> 409 no_revision; unknown drawing -> 404; bad rows -> 400', async () => {
+    seed(commentState());
+    const before = raw();
+    let r = await append('RPCL100MW-ARIPL-PSS-ELE-RPT-024', OURS);
+    assert.equal(r.statusCode, 409); assert.equal(r.body.error, 'no_revision');
+    r = await append('NOPE-1', OURS);
+    assert.equal(r.statusCode, 404); assert.equal(r.body.error, 'drawing_not_found');
+    r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', []);
+    assert.equal(r.statusCode, 400); assert.equal(r.body.error, 'rows_required');
+    r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', [{ text: 'ok' }, { text: '   ' }]);
+    assert.equal(r.statusCode, 400); assert.equal(r.body.error, 'row_text_required'); assert.equal(r.body.index, 1);
+    assert.equal(raw(), before);
+  });
+  await test('a Viewer may read comments but not append -> 403', async () => {
+    await withEnv({ PIPELINE_USER_EMAIL: 'viewer@tranzenergy.in' }, async () => {
+      seed(commentState());
+      assert.equal((await comments('RPCL100MW-ARIPL-PSS-ELE-DWG-030')).statusCode, 200);
+      const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS);
+      assert.equal(r.statusCode, 403); assert.equal(r.body.error, 'role_cannot_upload');
+    });
+  });
+  await test('the consultant does not see the appended rows (or the retry keys) before issue', async () => {
+    seed(commentState());
+    const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS, { clientKey: 'k1' });
+    assert.equal(r.statusCode, 200);
+    const s = stored();
+    const view = externalView(s, s.users.find(u => u.id === 'u7'));
+    const d = view.drawings.find(x => x.id === 'd5');
+    const ids = new Set((d.crsImported || []).map(c => c.id));
+    for (const id of r.body.rowIds) assert.ok(!ids.has(id), `row ${id} visible to the consultant`);
+    assert.equal(d.pipelineAppends, undefined);
+    assert.ok(!JSON.stringify(view).includes(OURS[0].text));
+  });
+  await test(`issued in the AEL template: his rows first, ours after (H6..)${fs.existsSync(AEL_TEMPLATE) ? '' : ' (template not found: skipped)'}`, async () => {
+    if (!fs.existsSync(AEL_TEMPLATE)) return;
+    seed(commentState({ stage: 'ir2' }));
+    const r = await append('RPCL100MW-ARIPL-PSS-ELE-DWG-030', OURS);
+    assert.equal(r.statusCode, 200);
+    const d = drawingOf('RPCL100MW-ARIPL-PSS-ELE-DWG-030');
+    // what issueToConsultant (src/AppContext.jsx) builds the sheet from: comments published
+    const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis: _v, ...rest } = o; return rest; };
+    const published = { ...d, pins: [], crsImported: d.crsImported.map(pub), crsRowMap: {}, review: { ...d.review, proposedCategory: '3' } };
+    const tpl = fs.readFileSync(AEL_TEMPLATE);
+    const project = { name: 'RPCL Madarganj 100 MW', workflow: { issueNotation: 'AEL', categoryFormat: 'Category-{key}',
+      crsTemplate: { url: `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${tpl.toString('base64')}` } } };
+    const out = await buildIssuedCrs(published, project);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(out.bytes.buffer.slice(out.bytes.byteOffset, out.bytes.byteOffset + out.bytes.byteLength));
+    const ws = book.worksheets[0];
+    const col = (c, from, n) => Array.from({ length: n }, (_, i) => ws.getCell(`${c}${from + i}`).value);
+    assert.deepEqual(col('H', 6, 5), [HIS[0], HIS[1], OURS[0].text, OURS[1].text, null]);
+    assert.deepEqual(col('A', 6, 4), [1, 2, 3, 4]);
+    assert.deepEqual(col('B', 6, 4), ['AEL', 'AEL', 'AEL', 'AEL']);
+    console.log(`      H6..H9: ${col('H', 6, 4).map(v => JSON.stringify(String(v).slice(0, 24))).join(', ')}`);
   });
 });
 
