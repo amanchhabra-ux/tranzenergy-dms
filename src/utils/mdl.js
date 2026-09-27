@@ -9,7 +9,7 @@
 //                    only while the review has nothing to say.
 // drawing.expected: true while the document is listed in the MDL but no file has arrived
 // (versions: [], currentVersion: null, no review, no due date).
-import { stageName } from './workflow.js';
+import { stageName, categoryText as wfCategoryText } from './workflow.js';
 
 export const COLUMN_TYPES = ['text', 'number', 'date', 'list'];
 
@@ -109,7 +109,8 @@ export function keyFromLabel(label, taken = new Set()) {
 }
 
 // ─── Values ─────────────────────────────────────────────────────────────────
-const categoryText = (key, project) => (key ? (project?.workflow?.categoryFormat || 'Category {key}').replace('{key}', key) : '');
+// the project's category list (its labels), else its categoryFormat
+const categoryText = (key, project) => wfCategoryText(key, project?.workflow);
 const day = (v) => (v ? String(v).slice(0, 10) : '');
 
 /** A read-only column's value, worked out from the drawing and its review. */

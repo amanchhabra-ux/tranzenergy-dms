@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AppContext } from '../AppContext';
 import { X, Clock, History, Send, CheckCircle2, Flag, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import {
-  STAGE, CATEGORIES, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
+  STAGE, categoriesOf, findCategory, categoryText, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
   dueState, today, openCommentCount, finalCheckOn, issuingStage, stageName,
 } from '../utils/workflow';
 
@@ -71,8 +71,9 @@ export function ReviewBar({ drawing }) {
   const assigned = stageActors(project, r.stage);
   const mine = canActOnStage(currentUser, project, r.stage) && (assigned.includes(currentUser?.id) || !assigned.length);
   const stageInfo = STAGE[r.stage];
-  const cat = r.category && CATEGORIES.find(c => c.key === r.category);
-  const openLeft = r.stage === 'closed' && r.category === '2' ? openCommentCount(drawing) : 0;
+  const cat = r.category ? { label: categoryText(r.category, wf) } : null;
+  // a closed review can still hold open comments (approved with comments): track them to closure
+  const openLeft = r.stage === 'closed' ? openCommentCount(drawing) : 0;
 
   let action = null;
   if (mine && !done) {
@@ -241,6 +242,8 @@ function CategoryModal({ drawing, project, onClose }) {
   const [note, setNote] = useState('');
   const [date, setDate] = useState(today());
   const client = shortName(project.workflow.clientName, 'Client');
+  const list = categoriesOf(project.workflow);
+  const picked = findCategory(project.workflow, cat);
   return (
     <Modal title={`${client} review category`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
       footer={<>
@@ -250,17 +253,17 @@ function CategoryModal({ drawing, project, onClose }) {
         </button>
       </>}>
       <div className="review-cats">
-        {CATEGORIES.map(c => (
+        {list.map(c => (
           <label key={c.key} className={`review-cat ${cat === c.key ? 'on' : ''} ${c.closes ? 'ok' : 'bad'}`}>
             <input type="radio" name="cat" value={c.key} checked={cat === c.key} onChange={() => setCat(c.key)} />
             <span><strong>{c.label}</strong><br /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.desc}</span></span>
           </label>
         ))}
       </div>
-      {cat && (
+      {picked && (
         <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {CATEGORIES.find(c => c.key === cat).closes
-            ? (cat === '2' ? 'The review closes; open comments stay tracked until they are resolved.' : 'The review closes.')
+          {picked.closes
+            ? (openCommentCount(drawing) ? 'The review closes; open comments stay tracked until they are resolved.' : 'The review closes.')
             : 'The drawing waits for the contractor to resubmit. The next revision restarts the review with these comments carried forward.'}
         </p>
       )}
@@ -335,7 +338,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
         <div className="review-cycles">
           {r.cycles.map(c => (
             <div key={c.cycle} className="review-cycle-row">
-              <strong>{c.version}</strong> · cycle {c.cycle} · {c.category ? `Category ${c.category}` : (STAGE[c.stage]?.label || c.stage)}
+              <strong>{c.version}</strong> · cycle {c.cycle} · {c.category ? categoryText(c.category, project.workflow) : (STAGE[c.stage]?.label || c.stage)}
               {c.issued?.url && <a href={dlHref(c.issued.url)} download={c.issued.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', c.issued.fileName)} className="review-link"><Download size={12} /> CRS as issued</a>}
             </div>
           ))}
@@ -348,7 +351,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
             <div>
               <div><strong>{h.byName}</strong> — {ACTION_TEXT[h.action] || h.action}
                 {h.from && h.to && h.action !== 'category' && <span style={{ color: 'var(--text-muted)' }}> ({STAGE[h.from]?.label} → {STAGE[h.to]?.label})</span>}
-                {h.category && <span> — <strong>Category {h.category}</strong>{h.decidedOn ? ` on ${h.decidedOn}` : ''}</span>}
+                {h.category && <span> — <strong>{categoryText(h.category, project.workflow)}</strong>{h.decidedOn ? ` on ${h.decidedOn}` : ''}</span>}
               </div>
               {h.note && <div className="review-history-note">{h.note}</div>}
               {h.crs?.url && <a href={dlHref(h.crs.url)} download={h.crs.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', h.crs.fileName)} className="review-link"><Download size={12} /> {h.crs.fileName}</a>}

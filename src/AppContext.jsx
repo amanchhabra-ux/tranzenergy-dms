@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, CATEGORIES, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
@@ -957,16 +957,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Step 8: the client's category (recorded by us — the client doesn't sign in)
   const recordCategory = (drawingId, category, note = '', decidedOn = today()) => {
     const d = drawings.find(x => x.id === drawingId);
-    const cat = CATEGORIES.find(c => c.key === category);
+    const wf = projectOf(d)?.workflow;
+    const cat = findCategory(wf, category); // the project's own list (default list when it has none)
     if (!d || !cat || d.review?.stage !== 'client' || !canAct(d)) return;
-    const to = cat.closes ? 'closed' : 'resubmit';
     setDrawings(prev => prev.map(x => (x.id !== drawingId ? x : {
-      ...x, review: {
-        ...x.review, stage: to, category, decidedOn, closedAt: cat.closes ? today() : null,
-        history: [...(x.review.history || []), histEntry('category', { from: 'client', to, category, note, decidedOn })],
-      },
+      ...x, review: reviewWithCategory(x.review, wf, category, { entry: histEntry, note, decidedOn }) || x.review,
     })));
-    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${cat.label}</strong>.`);
+    addLog(`<strong>${d.code}</strong> ${d.currentVersion}: ${p0(projectOf(d))} issued <strong>${categoryText(cat.key, wf)}</strong>.`);
   };
   const p0 = (p) => p?.workflow?.clientName || 'Client';
 

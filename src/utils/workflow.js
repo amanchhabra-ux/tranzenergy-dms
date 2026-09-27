@@ -27,12 +27,73 @@ export const NEXT_STAGE = { ir1: 'ir2', ir2: 'approval', approval: 'consultant',
 // before the CRS is issued, TranzEnergy's comments are internal (hidden from the consultant)
 export const PRE_ISSUE = new Set(['ir1', 'ir2', 'approval']);
 
-export const CATEGORIES = [
+// Review categories. A project can set its own list in workflow.categories
+// ([{ key, label, desc, closes }], admins only); a project without one uses this list.
+// `closes`: the client's category closes the review; otherwise it waits for a resubmission.
+export const DEFAULT_CATEGORIES = [
   { key: '1',  label: 'Category 1', desc: 'Approved — no comments',                closes: true },
   { key: '2',  label: 'Category 2', desc: 'Approved with comments — track to close', closes: true },
   { key: '3',  label: 'Category 3', desc: 'Not approved — revise and resubmit',     closes: false },
   { key: '4B', label: 'Category 4B', desc: 'Rejected — resubmit',                    closes: false },
 ];
+/** @deprecated the fixed list; use categoriesOf(project.workflow) */
+export const CATEGORIES = DEFAULT_CATEGORIES;
+
+// The legend of the AEL CRS template (Help sheet), TE-002. Only 1 and 4A close a review.
+export const AEL_CATEGORIES = [
+  { key: '1',   label: 'Category-1',   desc: 'Approved and Distributed.', closes: true },
+  { key: '2',   label: 'Category-2',   desc: 'Approved subject to incorporation of comments. Re-submit for approval after incorporation of comments.', closes: false },
+  { key: '2*',  label: 'Category-2*',  desc: 'Approved subject to incorporation of comments and re-submission in due course. Meanwhile, please proceed with execution.', closes: false },
+  { key: '3',   label: 'Category-3',   desc: 'Not approved. Re-submit for approval after incorporation of comments.', closes: false },
+  { key: '4A',  label: 'Category-4A',  desc: 'Kept for record/ reference.', closes: true },
+  { key: '4B',  label: 'Category-4B',  desc: 'Re-submit after incorporation of comments to retain for record/ reference.', closes: false },
+  { key: '4B*', label: 'Category-4B*', desc: 'Re-submit after incorporation of comments in due course in order to keep for record/ reference. Meanwhile, please proceed with execution.', closes: false },
+];
+
+/** The project's category list (wf = project.workflow). */
+export function categoriesOf(wf) {
+  const list = Array.isArray(wf?.categories) ? wf.categories.filter(c => c && String(c.key ?? '').trim()) : [];
+  return list.length ? list.map(c => ({ ...c, key: String(c.key).trim(), closes: c.closes === true })) : DEFAULT_CATEGORIES;
+}
+export const findCategory = (wf, key) => (key == null || key === '' ? null : categoriesOf(wf).find(c => c.key === String(key)) || null);
+
+/**
+ * How a category is written on the issued sheet, in the MDL and in the app: the label from
+ * the project's own list when it has one; else the project's categoryFormat ("Category-{key}");
+ * else "Category {key}".
+ */
+export function categoryText(key, wf) {
+  if (key == null || key === '') return '';
+  const own = Array.isArray(wf?.categories) && wf.categories.length ? findCategory(wf, key) : null;
+  if (own?.label) return own.label;
+  return String(wf?.categoryFormat || 'Category {key}').replace('{key}', key);
+}
+
+/**
+ * Step 8: the review after the client's category. A category that closes (per the project's
+ * list) closes it; any other waits for the resubmission. null for an unknown category.
+ */
+export function reviewWithCategory(review, wf, key, { entry, note = '', decidedOn = today() } = {}) {
+  const cat = findCategory(wf, key);
+  if (!review || !cat) return null;
+  const to = cat.closes ? 'closed' : 'resubmit';
+  return {
+    ...review, stage: to, category: cat.key, decidedOn, closedAt: cat.closes ? today() : null,
+    history: [...(review.history || []), entry('category', { from: review.stage, to, category: cat.key, note, decidedOn })],
+  };
+}
+
+/** Keys a project's reviews use (current and archived cycles): these cannot be deleted from its list. */
+export function categoriesInUse(drawings, projectId) {
+  const used = new Set();
+  for (const d of drawings || []) {
+    if (d?.projectId !== projectId || !d.review) continue;
+    const r = d.review;
+    [r.category, r.proposedCategory, ...(r.cycles || []).flatMap(c => [c?.category, c?.proposedCategory])]
+      .forEach(k => { if (k != null && k !== '') used.add(String(k)); });
+  }
+  return used;
+}
 
 export const DEFAULT_TURNAROUND_DAYS = 14;
 
@@ -136,8 +197,9 @@ export function dueState(review) {
 
 export function stageLabel(review, project) {
   if (!review) return 'Not in review';
-  if (review.stage === 'closed') return review.category ? `Closed · Cat ${review.category}` : 'Closed';
-  if (review.stage === 'resubmit') return `Cat ${review.category} · awaiting resubmission`;
+  const wf = project?.workflow;
+  if (review.stage === 'closed') return review.category ? `Closed · ${categoryText(review.category, wf)}` : 'Closed';
+  if (review.stage === 'resubmit') return `${categoryText(review.category, wf)} · awaiting resubmission`;
   return project ? stageName(project, review.stage) : (STAGE[review.stage]?.label || review.stage);
 }
 

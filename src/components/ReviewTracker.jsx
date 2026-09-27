@@ -3,7 +3,7 @@ import { AppContext } from '../AppContext';
 import { PlayCircle, AlertTriangle, Inbox, ChevronRight } from 'lucide-react';
 import { TAG, describe } from '../utils/activity';
 import {
-  STAGE, stageName, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
+  STAGE, stageName, categoryText, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
 } from '../utils/workflow';
 
 const FILTERS = [
@@ -179,7 +179,7 @@ export function MyReviews({ onOpenDrawing }) {
                 <span className="act-tag review">Review</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <strong>{d.code}</strong> {d.currentVersion} — {EVENT_TEXT[h.action] || h.action}
-                  {h.to && h.action !== 'category' ? ` → ${STAGE[h.to]?.label}` : ''}{h.category ? ` · Category ${h.category}` : ''}
+                  {h.to && h.action !== 'category' ? ` → ${STAGE[h.to]?.label}` : ''}{h.category ? ` · ${categoryText(h.category, p?.workflow)}` : ''}
                   <span className="tracker-sub"> · {h.byName}</span>
                 </span>
               </button>

@@ -531,6 +531,43 @@ await test('a consultant comment marks the working Excel for rewrite by an inter
   assert.ok(d.crsRev > d.crsSyncedRev);
 });
 
+// ── PR 4: category list per project (workflow settings are admin-only) ─────────
+const AEL = [
+  { key: '1', label: 'Category-1', desc: 'Approved and Distributed.', closes: true },
+  { key: '3', label: 'Category-3', desc: 'Not approved.', closes: false },
+  { key: '4A', label: 'Category-4A', desc: 'Kept for record/ reference.', closes: true },
+];
+
+await test('Project Manager setting the category list -> 403; admin -> 200', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.projects[0].workflow.categories = AEL;
+  const r = await post(EMAIL.u2, { state: s, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(r.body.error, 'admin_only');
+  assert.equal(stored().projects[0].workflow.categories, undefined);
+  assert.equal((await post(EMAIL.u1, { state: s, etag: null })).statusCode, 200);
+  assert.deepEqual(stored().projects[0].workflow.categories, AEL);
+});
+
+await test('Viewer changing a category\'s closes flag -> 403', async () => {
+  const s0 = baseState();
+  s0.projects[0].workflow.categories = AEL;
+  seed(s0);
+  const s = structuredClone(s0);
+  s.projects[0].workflow.categories[0].closes = false;
+  assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 403);
+  assert.equal(stored().projects[0].workflow.categories[0].closes, true);
+});
+
+await test('consultant sending a category list -> ignored', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  v.projects[0].workflow.categories = AEL;
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().projects[0].workflow.categories, undefined);
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });
