@@ -7,14 +7,8 @@ export { isExternal };
 const byId = (arr = []) => new Map((Array.isArray(arr) ? arr : []).filter(x => x && x.id).map(x => [x.id, x]));
 const hidden = (o) => o?.vis === 'internal';
 
-// The activity log and each drawing's activity trail live inside the workspace document,
-// so they have to be capped. The real fix is to move them out, to append-only storage
-// (a later step); until then keep 5000 entries each (same caps in src/utils/mergeState.js
-// and src/AppContext.jsx). Times are stamped here, never taken from the browser.
-export const LOG_CAP = 5000;
-export const ACTIVITY_CAP = 5000;
-// entries a consultant's single save may add (a bulk upload adds one per drawing)
-const PER_SAVE = 100;
+// The activity log and each drawing's activity trail are stored as append-only objects
+// (api/_lib/log.js), not in the workspace document; a save never changes them here.
 
 // Log entries are attributed by user id; entries written before authorId existed, by name.
 export const loggedBy = (l, user) => (l?.authorId ? l.authorId === user.id : l?.author === user.name);
@@ -34,7 +28,6 @@ function drawingForExternal(d) {
     ...d,
     pins: (d.pins || []).filter(p => !hidden(p)).map(p => ({ ...p, comments: (p.comments || []).filter(c => !hidden(c)) })),
     crsImported: (d.crsImported || []).filter(c => !hidden(c)),
-    activity: (d.activity || []).filter(e => !hidden(e)),
     crsData: null, crsFileName: null, crsLayout: null, crsRowMap: {}, crsClearRows: [],
   };
   // before issue, rows read from the working Excel are TranzEnergy's own, and so is the
@@ -58,7 +51,6 @@ export function externalView(state, user) {
     projects,
     drawings: (state.drawings || []).filter(d => allowed.has(d.projectId)).map(drawingForExternal),
     proposals: [],
-    activityLog: (state.activityLog || []).filter(l => loggedBy(l, user)),
     disciplines: state.disciplines || [],
     org: state.org || {},
   };
@@ -104,8 +96,6 @@ function fileLink(u, taken, own) {
 const str = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : '');
 const nowIso = () => new Date().toISOString();
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const byAtAsc = (a, b) => String(a.at).localeCompare(String(b.at));
-const byTimeDesc = (a, b) => String(b.time).localeCompare(String(a.time));
 
 /** A revision the consultant uploaded, field by field. */
 function cleanVersion(v, user, taken, own) {
@@ -170,17 +160,6 @@ function mergeComments(sd, inc, user) {
   return { pins, crsImported };
 }
 
-/** Their new activity entries (uploads, downloads, comments), attributed and timed here. */
-function mergeActivity(sd, inc, user, now) {
-  const seen = new Set((sd.activity || []).map(e => e?.id));
-  const mineNew = (Array.isArray(inc.activity) ? inc.activity : [])
-    .filter(e => e?.id && !seen.has(e.id) && e.by === user.id && !e.vis)
-    .slice(0, PER_SAVE)
-    .map(e => ({ ...e, id: String(e.id), by: user.id, byName: user.name, at: now }));
-  if (!mineNew.length) return sd.activity;
-  return [...(sd.activity || []), ...mineNew].sort(byAtAsc).slice(-ACTIVITY_CAP);
-}
-
 function mergeReview(sd, out, inc, user, project, newRevision) {
   const s = sd.review, i = inc.review;
   // a new revision uploaded by the consultant restarts the review at step 1 (steps 1–2).
@@ -202,7 +181,7 @@ function mergeReview(sd, out, inc, user, project, newRevision) {
     history: [...(s.history || []), serverEntry(user)('advanced', { from: s.stage, to: i.stage, note: str(theirs?.note, 2000) })] };
 }
 
-function mergeDrawing(sd, inc, user, project, taken, now) {
+function mergeDrawing(sd, inc, user, project, taken) {
   const out = { ...sd };
   const own = filesInView({ drawings: [sd] });
   // new revisions they uploaded
@@ -222,14 +201,12 @@ function mergeDrawing(sd, inc, user, project, taken, now) {
   // their browser has no working Excel to mark; flag it here so an internal tab rewrites it
   const commentsChanged = JSON.stringify([sd.pins, sd.crsImported]) !== JSON.stringify([out.pins, out.crsImported]);
   out.review = mergeReview(sd, out, inc, user, project, added.length > 0);
-  const activity = mergeActivity(sd, inc, user, now);
-  if (activity) out.activity = activity;
   out.crsRev = Math.max(sd.crsRev || 0, inc.crsRev || 0, commentsChanged && sd.crsData ? (sd.crsRev || 0) + 1 : 0); // internal users' browsers rewrite the Excel
   return out;
 }
 
 /** A submission the consultant registers (step 1), built field by field. */
-function freshDrawing(inc, user, project, taken, now) {
+function freshDrawing(inc, user, project, taken) {
   const none = new Set();
   const versions = [...new Map((Array.isArray(inc.versions) ? inc.versions : [])
     .map(v => cleanVersion(v, user, taken, none)).filter(Boolean).map(v => [v.version, v])).values()];
@@ -250,37 +227,13 @@ function freshDrawing(inc, user, project, taken, now) {
     versions,
     ...mergeComments({}, inc, user),
   };
-  const activity = mergeActivity({}, inc, user, now);
-  if (activity) d.activity = activity;
   // the review starts on the server's values; only the uploader's note is taken
   if (workflowOn(project)) d.review = newReviewFor(d, project, null, { entry: serverEntry(user), note: str(inc.review?.note?.text, 2000), by: user.name });
   return d;
 }
 
-/**
- * Internal saves: log and activity entries the save adds get the server's time; entries
- * already stored keep theirs, so a browser clock cannot reorder or evict the record.
- * (A consultant's entries are stamped in mergeExternal.)
- */
-export function stampNewEntries(before, next, now = nowIso()) {
-  const stamp = (list, old, field) => {
-    if (!Array.isArray(list)) return list;
-    const stored = new Map((old || []).filter(e => e?.id).map(e => [e.id, e[field]]));
-    return list.map(e => (!e || !e.id ? e : { ...e, [field]: stored.has(e.id) ? stored.get(e.id) : now }));
-  };
-  const oldDrawings = byId(before?.drawings);
-  return {
-    ...next,
-    activityLog: stamp(next.activityLog, before?.activityLog, 'time'),
-    drawings: Array.isArray(next.drawings)
-      ? next.drawings.map(d => (d && Array.isArray(d.activity) ? { ...d, activity: stamp(d.activity, oldDrawings.get(d.id)?.activity, 'at') } : d))
-      : next.drawings,
-  };
-}
-
 /** Apply a consultant's save to the full workspace. */
 export function mergeExternal(full, incoming, user) {
-  const now = nowIso();
   const allowed = allowedProjectIds(full, user);
   const projects = byId(full.projects);
   const S = byId(full.drawings);
@@ -289,20 +242,11 @@ export function mergeExternal(full, incoming, user) {
   const drawings = (full.drawings || []).map(sd => {
     if (!allowed.has(sd.projectId)) return sd;
     const inc = I.get(sd.id);
-    return inc && inc.projectId === sd.projectId ? mergeDrawing(sd, inc, user, projects.get(sd.projectId), taken, now) : sd;
+    return inc && inc.projectId === sd.projectId ? mergeDrawing(sd, inc, user, projects.get(sd.projectId), taken) : sd;
   });
   // new submissions registered by the consultant (step 1)
   const fresh = [...I.values()].filter(d => !S.has(d.id) && allowed.has(d.projectId))
-    .map(d => freshDrawing(d, user, projects.get(d.projectId), taken, now));
-  // their new log entries: attributed and timed by the server, a limited number per save
-  const logIds = new Set((full.activityLog || []).map(l => l.id));
-  const newLogs = (Array.isArray(incoming.activityLog) ? incoming.activityLog : [])
-    .filter(l => l?.id && !logIds.has(l.id) && loggedBy(l, user))
-    .slice(0, PER_SAVE)
-    .map(l => ({ id: String(l.id), message: String(l.message || '').slice(0, 500), author: user.name, authorId: user.id, time: now }));
-  return {
-    ...full,
-    drawings: [...fresh, ...drawings],
-    activityLog: [...newLogs, ...(full.activityLog || [])].sort(byTimeDesc).slice(0, LOG_CAP),
-  };
+    .map(d => freshDrawing(d, user, projects.get(d.projectId), taken));
+  // their log and activity entries are taken out of the save by extractFromSave (api/_lib/log.js)
+  return { ...full, drawings: [...fresh, ...drawings] };
 }

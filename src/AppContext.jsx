@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
 import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, reviewWithProposed, reviewWithDue, canEditDue, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
@@ -6,6 +6,7 @@ import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
 import { applyPlan } from './utils/mdlImport';
+import { queueLog, queueActivity, flushOutbox, fetchLog, fetchRecentActivity, mergeEntries } from './utils/logClient';
 
 export const AppContext = createContext(null);
 
@@ -28,10 +29,12 @@ const withOther = (list) => (list && list.length ? (list.includes('Other') ? lis
 // `force` also creates an Excel when the drawing has none yet (changes made in the CRS panel).
 const bumpCrs = (d, force = false) => ((force || d.crsData) ? { ...d, crsRev: (d.crsRev || 0) + 1 } : d);
 const crsNeedsSync = (d) => (d.crsRev || 0) > (d.crsSyncedRev || 0);
-// Per-drawing activity trail: file uploaded / downloaded, comment added / closed (newest last)
-// The server stamps each new entry's time; cap as on the server (api/_lib/view.js ACTIVITY_CAP)
-const ACTIVITY_CAP = 5000;
-const withActivity = (d, entry) => ({ ...d, activity: [...(d.activity || []), entry].slice(-ACTIVITY_CAP) });
+// Per-drawing activity trail (file uploaded / downloaded, comment added / closed) and the
+// workspace log are not part of the workspace document: entries are posted to /api/activity
+// and /api/log (utils/logClient.js) and read back from there. The server stamps their time.
+// Recent activity on every drawing is loaded for the tags and "My reviews"; a drawing's full
+// trail pages in its activity panel.
+const RECENT_DAYS = 14;
 const snippet = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 90 ? `${x.slice(0, 87)}…` : x; };
 const isClosedStatus = (st) => /^(closed|accepted|resolved)$/i.test(String(st || '').trim());
 
@@ -82,13 +85,13 @@ function stripForCloud(data) {
   return {
     users: data.users || [],
     projects: data.projects || [],
-    drawings: (data.drawings || []).map(d => ({
+    // a drawing's activity is not part of the document (it is stored as log entries)
+    drawings: (data.drawings || []).map(({ activity: _activity, ...d }) => ({
       ...d,
       versions: (d.versions || []).map(v => ({ ...v, pdfData: isStoredFile(v.pdfData) ? v.pdfData : null })),
       pdfData: isStoredFile(d.pdfData) ? d.pdfData : null,
     })),
     proposals: (data.proposals || []).map(p => ({ ...p, fileData: isStoredFile(p.fileData) ? p.fileData : null })),
-    activityLog: data.activityLog || [],
     disciplines: data.disciplines || [],
     org: data.org || {},
   };
@@ -145,9 +148,15 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const [projects,    setProjects]    = useState(saved?.projects    || SEED_PROJECTS);
   const [drawings,    setDrawings]    = useState(saved?.drawings    || SEED_DRAWINGS);
   const [proposals,   setProposals]   = useState(saved?.proposals   || SEED_PROPOSALS);
-  const [activityLog, setActivityLog] = useState(saved?.activityLog || []);
+  // workspace log: the pages loaded from /api/log plus this browser's new entries, newest first
+  const [activityLog, setActivityLog] = useState([]);
+  const [logCursor, setLogCursor] = useState(null);   // where the next page starts; null: no more
+  // recent drawing activity by drawing id, oldest first (as drawing.activity used to be)
+  const [activityMap, setActivityMap] = useState({});
   const [disciplines, setDisciplines] = useState(withOther(saved?.disciplines));
   const [org,         setOrg]         = useState(saved?.org || {}); // organisation settings (name, logo, colours)
+  const drawingsRef = useRef(drawings);
+  drawingsRef.current = drawings;
 
   // ─── Shared cloud database ────────────────────────────────────────────────
   // The whole workspace is one JSON document in Vercel Blob. Every browser:
@@ -157,7 +166,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   //  3. checks for other people's changes every 30 s and when the tab regains focus.
   const [cloudStatus, setCloudStatus] = useState('connecting'); // connecting | ok | offline
   const stateRef = useRef(null);
-  stateRef.current = { users, projects, drawings, proposals, activityLog, disciplines, org };
+  stateRef.current = { users, projects, drawings, proposals, disciplines, org };
   const baseRef = useRef(null);     // last version seen in the cloud (stripped)
   const etagRef = useRef(null);
   const cloudReady = useRef(false);
@@ -173,7 +182,6 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     setProjects(s.projects || []);
     setDrawings(s.drawings || []);
     setProposals(s.proposals || []);
-    setActivityLog(s.activityLog || []);
     setDisciplines(withOther(s.disciplines));
     setOrg(s.org || {});
   }, []);
@@ -223,6 +231,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         baseRef.current = local;
         etagRef.current = body.etag || res.headers.get('x-state-etag') || null;
         setCloudStatus('ok');
+        flushOutbox(); // activity on a drawing this save just created can go now
       } else {
         throw new Error(`Save failed (${res.status})`);
       }
@@ -260,8 +269,12 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       // First load normally takes the cloud copy. Exception: the cloud workspace is empty
       // but this browser has work → keep ours and send it up (recovers a restored/blank store;
       // not after an admin's deliberate Reset Workspace).
-      const wasReset = (r.state.activityLog || []).some(l => /Workspace reset/i.test(l?.message || ''));
-      const keepLocal = !cloudReady.current && !hasWork(r.state) && hasWork(local) && !wasReset;
+      let keepLocal = !cloudReady.current && !hasWork(r.state) && hasWork(local);
+      if (keepLocal) {
+        // not after an admin's deliberate Reset Workspace (its entry is in the log)
+        const recent = await fetchLog({ limit: 20 }).catch(() => ({ entries: [] }));
+        if ((recent.entries || []).some(l => /Workspace reset/i.test(l?.message || ''))) keepLocal = false;
+      }
       const merged = cloudReady.current ? mergeState(baseRef.current, local, r.state)
         : keepLocal ? { ...local, users: mergeUsers(r.state.users, local.users) } : r.state;
       baseRef.current = r.state;
@@ -278,6 +291,77 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       done();
     }
   }, [fetchCloud, applyState, pushToCloud]);
+
+  // ─── Activity Log ──────────────────────────────────────────────────────────
+  // Shown at once, posted in the background; the server stamps time and author.
+  const addLog = useCallback((message, authorName) => {
+    const entry = {
+      id: uid('log'),
+      message,
+      author: authorName || currentUser?.name || 'System',
+      ...(currentUser?.id ? { authorId: currentUser.id } : {}),
+      time: new Date().toISOString(),
+    };
+    setActivityLog(prev => [entry, ...prev]);
+    queueLog(entry);
+  }, [currentUser]);
+
+  // One drawing activity entry: shown at once in the tags and the panel, posted in the background
+  const recordActivity = useCallback((drawingId, entry) => {
+    if (!drawingId || !entry) return;
+    setActivityMap(prev => ({ ...prev, [drawingId]: mergeEntries(prev[drawingId], [entry], 'at', false) }));
+    queueActivity(drawingId, entry);
+  }, []);
+
+  // Newest log page (first load and every check) and older pages on demand
+  const logReady = useRef(false);
+  const refreshLog = useCallback(async () => {
+    try {
+      const page = await fetchLog({ limit: 50 });
+      setActivityLog(prev => mergeEntries(prev, page.entries || []));
+      if (!logReady.current) { logReady.current = true; setLogCursor(page.cursor || null); }
+    } catch (e) { console.warn('Log not loaded:', e.message); }
+  }, []);
+  const loadMoreLog = useCallback(async () => {
+    if (!logCursor) return;
+    const page = await fetchLog({ limit: 50, cursor: logCursor });
+    setActivityLog(prev => mergeEntries(prev, page.entries || []));
+    setLogCursor(page.cursor || null);
+  }, [logCursor]);
+
+  // Recent activity on every drawing (the window the tags and "My reviews" look at).
+  // Later checks ask only for what is newer than the newest entry held, with a margin.
+  const newestActivity = useRef(null);
+  const refreshActivity = useCallback(async () => {
+    try {
+      const since = newestActivity.current
+        ? new Date(Date.parse(newestActivity.current) - 5 * 60000).toISOString()
+        : new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
+      const got = [];
+      let cursor = null;
+      for (let i = 0; i < 6; i++) { // up to 3000 entries per check
+        const page = await fetchRecentActivity({ since, limit: 500, cursor });
+        got.push(...(page.entries || []));
+        cursor = page.cursor;
+        if (!cursor) break;
+      }
+      for (const e of got) if (!newestActivity.current || String(e.at) > newestActivity.current) newestActivity.current = String(e.at);
+      if (!got.length) return;
+      setActivityMap(prev => {
+        const by = {};
+        for (const e of got) (by[e.drawingId] = by[e.drawingId] || []).push(e);
+        const next = { ...prev };
+        for (const [id, list] of Object.entries(by)) next[id] = mergeEntries(prev[id], list, 'at', false);
+        return next;
+      });
+    } catch (e) { console.warn('Activity not loaded:', e.message); }
+  }, []);
+
+  // what the rest of the app reads: each drawing with its recent activity
+  const drawingsView = useMemo(
+    () => drawings.map(d => (activityMap[d.id] ? { ...d, activity: activityMap[d.id] } : d)),
+    [drawings, activityMap],
+  );
 
   // First load
   useEffect(() => {
@@ -298,25 +382,31 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       }
       await pullFromCloud();
       setLoading(false);
+      refreshLog();
+      refreshActivity();
+      flushOutbox();
     })();
-  }, [pullFromCloud]);
+  }, [pullFromCloud, refreshLog, refreshActivity]);
 
   // Keep up with other people's changes
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible' && !needsLogin && !loading) pullFromCloud(); };
+    const tick = () => {
+      if (document.visibilityState !== 'visible' || needsLogin || loading) return;
+      pullFromCloud(); refreshLog(); refreshActivity(); flushOutbox();
+    };
     const iv = setInterval(tick, 30000);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(iv); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); };
-  }, [pullFromCloud, needsLogin, loading]);
+  }, [pullFromCloud, refreshLog, refreshActivity, needsLogin, loading]);
 
   // Save changes: this browser instantly, the cloud after a short pause
   useEffect(() => {
     if (loading) return;
-    saveState({ currentUser, users, projects, drawings, proposals, activityLog, disciplines, org });
+    saveState({ currentUser, users, projects, drawings, proposals, disciplines, org });
     const timer = setTimeout(() => pushToCloud(), 1500);
     return () => clearTimeout(timer);
-  }, [currentUser, users, projects, drawings, proposals, activityLog, disciplines, org, loading, pushToCloud]);
+  }, [currentUser, users, projects, drawings, proposals, disciplines, org, loading, pushToCloud]);
 
   // Organisation colours, page title and icon; remembered for the sign-in page
   useEffect(() => {
@@ -332,17 +422,6 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     else if (!stateEquals(u, currentUser)) setCurrentUser(u);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users, loading]);
-
-  // ─── Activity Log ──────────────────────────────────────────────────────────
-  const addLog = useCallback((message, authorName) => {
-    setActivityLog(prev => [{
-      id: uid('log'),
-      message,
-      author: authorName || currentUser?.name || 'System',
-      authorId: currentUser?.id || null,
-      time: new Date().toISOString() // the server stamps its own time on save
-    }, ...prev].slice(0, 5000)); // same cap as mergeState.js and the server (api/_lib/view.js LOG_CAP)
-  }, [currentUser]);
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
   const login = (userId) => {
@@ -427,8 +506,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Downloads are recorded for everyone who can see the drawing (viewers too)
   const recordDownload = useCallback((drawingId, what, fileName) => {
     if (!currentUser) return;
-    setDrawings(prev => prev.map(d => (d.id !== drawingId ? d : withActivity(d, ev('download', { what, fileName: fileName || null, version: d.currentVersion })))));
-  }, [currentUser, ev]);
+    const d = drawingsRef.current.find(x => x.id === drawingId);
+    if (d) recordActivity(drawingId, ev('download', { what, fileName: fileName || null, version: d.currentVersion }));
+  }, [currentUser, ev, recordActivity]);
 
   // ─── Projects ──────────────────────────────────────────────────────────────
   const createProject = (data) => {
@@ -499,8 +579,9 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       pins: []
     };
     const proj = projects.find(p => p.id === dwg.projectId);
-    const started = withNewReview(withActivity(dwg, ev('upload', { what: 'drawing', version: startVer, ...(data.submissionNote ? { note: snippet(data.submissionNote) } : {}) })), proj, data.submissionNote);
+    const started = withNewReview(dwg, proj, data.submissionNote);
     setDrawings(prev => [started, ...prev]);
+    recordActivity(dwg.id, ev('upload', { what: 'drawing', version: startVer, ...(data.submissionNote ? { note: snippet(data.submissionNote) } : {}) }));
     addLog(`Drawing <strong>${dwg.code}</strong> registered by <strong>${currentUser?.name}</strong>.`);
     return started;
   };
@@ -562,19 +643,21 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   const uploadCRS = (drawingId, crsData, parsed, fileName) => {
     if (!canDo('upload')) return;
     if (isExternal(currentUser)) { importCrsComments(drawingId, parsed); return; } // never the working file
+    const cur = drawingsRef.current.find(x => x.id === drawingId);
+    if (!cur) return;
+    const isPdf = parsed?.fileType === 'pdf';
+    addLog(isPdf ? `CRS (PDF) uploaded for <strong>${cur.code}</strong>.` : `CRS uploaded for <strong>${cur.code}</strong>.`);
+    recordActivity(drawingId, ev('upload', { what: isPdf ? 'crs-pdf' : 'crs', fileName: fileName || null, version: cur.currentVersion }));
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
-      if (parsed?.fileType === 'pdf') {
+      if (isPdf) {
         // a signed/scanned CRS in PDF form: keep it for viewing, the Excel CRS stays as is
         if (d.crsPdf && d.crsPdf !== crsData) deleteBlobUrl(d.crsPdf);
-        addLog(`CRS (PDF) uploaded for <strong>${d.code}</strong>.`);
-        return withActivity({ ...d, crsPdf: crsData }, ev('upload', { what: 'crs-pdf', fileName: fileName || null, version: d.currentVersion }));
+        return { ...d, crsPdf: crsData };
       }
       if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData); // replaced file
-      addLog(`CRS uploaded for <strong>${d.code}</strong>.`);
-      const upEv = ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion });
-      if (!parsed) return withActivity({ ...d, crsData }, upEv);
-      return withActivity({
+      if (!parsed) return { ...d, crsData };
+      return {
         ...d,
         ...crsFieldUpdates(d, parsed.meta || {}),
         crsData,
@@ -585,7 +668,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsRowMap: pinRowMapFromImport(d, parsed.comments || []),
         crsFileName: fileName || d.crsFileName || null,
         crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
-      }, upEv);
+      };
     }));
   };
 
@@ -606,37 +689,37 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Comments added/edited in the CRS panel (not tied to a pin)
   const updateCrsItems = (drawingId, updater) => {
     if (!canDo('upload')) return;
-    setDrawings(prev => prev.map(d => {
-      if (d.id !== drawingId) return d;
-      const old = d.crsImported || [];
+    const withAuthor = (d, old, items) => {
       const before = new Set(old.map(c => c.id).filter(Boolean));
-      const items = updater(old).map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
-      // what changed → activity
-      let next = { ...d, crsImported: items };
-      items.forEach((c, i) => {
-        const prevItem = c.id ? old.find(o => o.id === c.id) : old[i];
-        const internal = c.vis === 'internal' ? { vis: 'internal' } : {};
-        if (!prevItem) { next = withActivity(next, ev('comment', { text: snippet(c.comment), ...internal })); return; }
-        if (String(c.reply || '') !== String(prevItem.reply || '') && String(c.reply || '').length > String(prevItem.reply || '').length) {
-          next = withActivity(next, ev('comment', { reply: true, text: snippet(String(c.reply).split('\n').pop()), on: snippet(c.comment), ...internal }));
-        }
-        if (isClosedStatus(c.status) !== isClosedStatus(prevItem.status)) {
-          next = withActivity(next, ev(isClosedStatus(c.status) ? 'closed' : 'reopened', { status: c.status, text: snippet(c.comment), ...internal }));
-        }
-      });
-      return bumpCrs(next, true);
-    }));
+      return items.map(c => (c.local && c.id && !before.has(c.id) ? { ...c, authorId: currentUser?.id, ...tagNew(d) } : c));
+    };
+    // what changed → activity, worked out once from the drawing as it is now
+    const cur = drawingsRef.current.find(x => x.id === drawingId);
+    if (!cur) return;
+    const old = cur.crsImported || [];
+    const items = withAuthor(cur, old, updater(old));
+    items.forEach((c, i) => {
+      const prevItem = c.id ? old.find(o => o.id === c.id) : old[i];
+      const internal = c.vis === 'internal' ? { vis: 'internal' } : {};
+      if (!prevItem) { recordActivity(drawingId, ev('comment', { text: snippet(c.comment), ...internal })); return; }
+      if (String(c.reply || '') !== String(prevItem.reply || '') && String(c.reply || '').length > String(prevItem.reply || '').length) {
+        recordActivity(drawingId, ev('comment', { reply: true, text: snippet(String(c.reply).split('\n').pop()), on: snippet(c.comment), ...internal }));
+      }
+      if (isClosedStatus(c.status) !== isClosedStatus(prevItem.status)) {
+        recordActivity(drawingId, ev(isClosedStatus(c.status) ? 'closed' : 'reopened', { status: c.status, text: snippet(c.comment), ...internal }));
+      }
+    });
+    setDrawings(prev => prev.map(d => (d.id !== drawingId ? d : bumpCrs({ ...d, crsImported: d.crsImported === old ? items : withAuthor(d, d.crsImported || [], updater(d.crsImported || [])) }, true))));
   };
 
   // Set a pin's status from the CRS: 'Open' | 'Resolved' | 'Accepted'
   const setPinStatus = (drawingId, pinId, status) => {
     if (!canDo(status === 'Accepted' ? 'approve' : 'upload')) return;
+    const pin = (drawingsRef.current.find(x => x.id === drawingId)?.pins || []).find(p => p.id === pinId);
+    if (pin && !!(pin.resolved || pin.accepted) !== (status !== 'Open')) recordActivity(drawingId, pinEvent(pin, status !== 'Open' ? 'closed' : 'reopened', status));
     setDrawings(prev => prev.map(d => {
       if (d.id !== drawingId) return d;
-      const pin = (d.pins || []).find(p => p.id === pinId);
-      const wasClosed = !!(pin?.resolved || pin?.accepted);
-      let next = { ...d, pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }) };
-      if (pin && wasClosed !== (status !== 'Open')) next = withActivity(next, pinEvent(pin, status !== 'Open' ? 'closed' : 'reopened', status));
+      const next = { ...d, pins: (d.pins || []).map(p => p.id !== pinId ? p : { ...p, resolved: status !== 'Open', accepted: status === 'Accepted' }) };
       return bumpCrs(next, true);
     }));
   };
@@ -732,8 +815,6 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   // Any drawing whose CRS changed (reply, status, new comment, pin comment) gets
   // its Excel rewritten here, one at a time. Because the "needs sync" marker is
   // saved with the drawing, a change is never lost to a reload or a view switch.
-  const drawingsRef = useRef(drawings);
-  drawingsRef.current = drawings;
   const syncBusy = useRef(false);
   const [syncKick, setSyncKick] = useState(0);
   const pendingSync = drawings.filter(crsNeedsSync).map(d => `${d.id}:${d.crsRev}`).join('|');
@@ -797,13 +878,15 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         versions: [rev, ...(dwg.versions || [])]
       };
       // a new revision restarts the review at step 1 (comments carried forward)
-      return withNewReview(withActivity(next, ev('upload', { what: 'revision', version: nextVer, note: snippet(changeSummary) })), projects.find(p => p.id === dwg.projectId), changeSummary);
+      return withNewReview(next, projects.find(p => p.id === dwg.projectId), changeSummary);
     }));
 
+    const cur = drawingsRef.current.find(x => x.id === drawingId);
+    if (cur) recordActivity(drawingId, ev('upload', { what: 'revision', version: nextVer || nextRevision(cur, opts.version), note: snippet(changeSummary) }));
     if (logMsg) addLog(logMsg);
     return nextVer;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, addLog, canDo, projects, ev]);
+  }, [currentUser, addLog, canDo, projects, ev, recordActivity]);
 
   // ─── Drawing Status ────────────────────────────────────────────────────────
   const setDrawingStatus = (id, status) => {
@@ -847,32 +930,34 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
           return { ...pin, comments: [...pin.comments, comment] };
         })
       });
-      const pin = (dwg.pins || []).find(p => p.id === pinId);
-      return withActivity(updated, ev('comment', {
-        pin: pin?.label, reply: (pin?.comments || []).length > 0, text: snippet(text),
-        ...(tagNew(dwg).vis ? { vis: 'internal' } : {}),
-      }));
+      return updated;
     }));
-  }, [currentUser, canDo, tagNew, ev]);
+    const dwg = drawingsRef.current.find(x => x.id === drawingId);
+    const pin = (dwg?.pins || []).find(p => p.id === pinId);
+    if (dwg) recordActivity(drawingId, ev('comment', {
+      pin: pin?.label, reply: (pin?.comments || []).length > 0, text: snippet(text),
+      ...(tagNew(dwg).vis ? { vis: 'internal' } : {}),
+    }));
+  }, [currentUser, canDo, tagNew, ev, recordActivity]);
 
   const resolvePin = useCallback((drawingId, pinId) => {
     if (!canDo('upload')) return;
+    const pin = (drawingsRef.current.find(x => x.id === drawingId)?.pins || []).find(p => p.id === pinId);
+    if (pin) recordActivity(drawingId, pinEvent(pin, pin.resolved ? 'reopened' : 'closed', pin.resolved ? 'Open' : 'Resolved'));
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const pin = dwg.pins.find(p => p.id === pinId);
-      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) };
-      return bumpCrs(pin ? withActivity(next, pinEvent(pin, pin.resolved ? 'reopened' : 'closed', pin.resolved ? 'Open' : 'Resolved')) : next);
+      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, resolved: !p.resolved } : p) });
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canDo, ev]);
 
   const acceptPin = useCallback((drawingId, pinId) => {
     if (!canDo('approve')) return;
+    const pin = (drawingsRef.current.find(x => x.id === drawingId)?.pins || []).find(p => p.id === pinId);
+    if (pin && !pin.accepted && !pin.resolved) recordActivity(drawingId, pinEvent(pin, 'closed', 'Accepted'));
     setDrawings(prev => prev.map(dwg => {
       if (dwg.id !== drawingId) return dwg;
-      const pin = dwg.pins.find(p => p.id === pinId);
-      const next = { ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) };
-      return bumpCrs(pin && !pin.accepted && !pin.resolved ? withActivity(next, pinEvent(pin, 'closed', 'Accepted')) : next);
+      return bumpCrs({ ...dwg, pins: dwg.pins.map(p => p.id === pinId ? { ...p, accepted: !p.accepted, resolved: true } : p) });
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canDo, ev]);
@@ -948,7 +1033,6 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsImported: [...items, ...(x.crsImported || []).filter(z => z.local && !itemIds.has(z.id))],
         crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
         crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
-        activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
         review: (() => {
           const withCat = reviewWithProposed(x.review, p?.workflow, proposedKey, { entry: histEntry }) || x.review;
           return {
@@ -958,6 +1042,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         })(),
       };
     }));
+    recordActivity(drawingId, ev('upload', { what: 'crs-issued', fileName, version: d.currentVersion }));
     addLog(`<strong>${d.code}</strong> ${d.currentVersion}: CRS submitted to ${p?.workflow?.consultantName || 'the consultant'}.`);
   };
 
@@ -1079,7 +1164,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
     if (data.projects) setProjects(data.projects);
     if (data.drawings) setDrawings(data.drawings);
     if (data.proposals) setProposals(data.proposals);
-    if (data.activityLog) setActivityLog(data.activityLog);
+    // the log is append-only on the server: an imported file's log is not replayed into it
     if (data.disciplines) setDisciplines(withOther(data.disciplines));
     if (data.org) setOrg(data.org);
     addLog('Workspace data imported successfully.', currentUser?.name || 'System');
@@ -1088,7 +1173,8 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   return (
     <AppContext.Provider value={{
       // State
-      currentUser, users, projects, drawings, proposals, activityLog, loading, cloudStatus,
+      currentUser, users, projects, drawings: drawingsView, proposals, activityLog, loading, cloudStatus,
+      logHasMore: !!logCursor, loadMoreLog,
       org: orgOf(org), orgSettings: org, updateOrg,
       authMode, accessDenied, onSignOut, needsLogin, mustChangePassword,
       // Consts
@@ -1111,7 +1197,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       // Comments
       addPin, addComment, resolvePin, acceptPin,
       // Activity tags
-      recordDownload,
+      recordDownload, recordActivity,
       // Review workflow
       startReview, advanceReview, issueToConsultant, recordCategory, setReviewDue, setReviewStage, updateWorkflow,
       // MDL

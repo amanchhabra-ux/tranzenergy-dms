@@ -14,6 +14,7 @@ import { readState, writeState, forgetMembers } from '../_lib/state.js';
 import { r2Configured, cleanKey, presign, putObject, readObject, appFileUrl } from '../_lib/r2.js';
 import { filesInWorkspace } from '../_lib/view.js';
 import { reviewEvents, sendReviewEmails } from '../_lib/notify.js';
+import { appendEntry } from '../_lib/log.js';
 import { freshKey } from '../r2-upload-url.js';
 import { sniffType, readCrs } from '../../src/utils/crs.js';
 import { normCode } from '../../src/utils/mdl.js';
@@ -118,8 +119,21 @@ async function change(req, kind, applyFn) {
     check: (before, next) => checkSave(before, next, acting),
   });
   forgetMembers();
+  const logged = await storeEntries(done.entries);
   try { await sendReviewEmails(done.state, reviewEvents(done.before, done.state)); } catch (e) { console.error('[notify]', e); }
-  return { done, url };
+  return { done, url, logged };
+}
+
+/** The change's log and activity entries, as objects (api/_lib/log.js); a failure is retried once. → true | false */
+async function storeEntries(entries) {
+  const jobs = [...(entries?.log || []).map(entry => ({ kind: 'log', entry })), ...(entries?.activity || []).map(a => ({ kind: 'activity', ...a }))];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      for (const j of jobs) await appendEntry(j.kind, j.entry, { drawingId: j.drawingId });
+      return true;
+    } catch (e) { console.error('[pipeline] log entries', e); }
+  }
+  return false;
 }
 
 async function handle(req, res, action) {
@@ -144,7 +158,7 @@ async function handle(req, res, action) {
   }
 
   if (action === 'register') {
-    const { done, url } = await change(req, 'pdf', (s, a) => applyRegister(s, {
+    const { done, url, logged } = await change(req, 'pdf', (s, a) => applyRegister(s, {
       who: a.who, project: a.project, code: body.code, title: body.title, revision: body.revision,
       fileUrl: a.url, fileName: a.fileName, now: a.now,
     }));
@@ -152,15 +166,15 @@ async function handle(req, res, action) {
     return res.status(200).json({
       outcome: done.outcome, code: d.code, drawingId: d.id, version: done.version, file: url,
       review: d.review ? { stage: d.review.stage, cycle: d.review.cycle, dueDate: d.review.dueDate, dueSource: d.review.dueSource } : null,
-      attempts: done.attempts,
+      attempts: done.attempts, ...(logged ? {} : { logWritten: false }),
     });
   }
 
   if (action === 'attach-crs') {
-    const { done, url } = await change(req, 'crs', (s, a) => applyAttachCrs(s, {
+    const { done, url, logged } = await change(req, 'crs', (s, a) => applyAttachCrs(s, {
       who: a.who, project: a.project, code: body.code, crsUrl: a.url, fileName: a.fileName, parsed: a.parsed, now: a.now,
     }));
-    return res.status(200).json({ outcome: 'attached', code: done.drawing.code, rows: done.rows, crs: crsSummary(done.drawing), file: url, attempts: done.attempts });
+    return res.status(200).json({ outcome: 'attached', code: done.drawing.code, rows: done.rows, crs: crsSummary(done.drawing), file: url, attempts: done.attempts, ...(logged ? {} : { logWritten: false }) });
   }
   return res.status(404).json({ error: 'unknown_action' });
 }

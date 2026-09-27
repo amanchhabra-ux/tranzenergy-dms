@@ -93,3 +93,21 @@ export async function putText(key, text, { ifMatch, create = false, contentType 
   if (!res.ok) throw new Error(`R2 write failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
   return strongEtag(res.headers.get('etag'));
 }
+
+/**
+ * One page of keys under a prefix, in ascending order (ListObjectsV2).
+ * → { keys: string[], truncated: boolean }
+ */
+export async function listKeys(prefix, { startAfter, limit = 1000 } = {}) {
+  const url = new URL(`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${process.env.R2_BUCKET}`);
+  url.searchParams.set('list-type', '2');
+  url.searchParams.set('prefix', prefix);
+  url.searchParams.set('max-keys', String(Math.min(1000, Math.max(1, limit))));
+  if (startAfter) url.searchParams.set('start-after', startAfter);
+  const res = await r2().fetch(url.toString(), { method: 'GET' });
+  if (!res.ok) throw new Error(`R2 list failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const xml = await res.text();
+  const unxml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  const keys = [...xml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)].map(m => unxml(m[1]));
+  return { keys, truncated: /<IsTruncated>true<\/IsTruncated>/.test(xml) };
+}

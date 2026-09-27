@@ -2,6 +2,7 @@ import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { StorageMigration } from './StorageMigration';
 import { OrgSettings } from './OrgSettings';
+import { LoadMore } from './ActivityPanel';
 import { fileSlug } from '../utils/org';
 import { isStoredFile } from '../utils/uploadFile';
 import { UserPasswordModal, generatePassword, setUserPassword } from './UserPasswordModal';
@@ -16,7 +17,7 @@ const ROLE_COLORS = {
 const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings, serverWarnings = [] } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, logHasMore, loadMoreLog, addLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings, serverWarnings = [] } = useContext(AppContext);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -145,9 +146,10 @@ export function AdminPanel({ initialTab = 'users' }) {
         projects: [],
         drawings: [],
         proposals: [],
-        activityLog: [{ id: `log-${Date.now()}`, message: 'Workspace reset — fresh start.', author: currentUser?.name || 'Admin', time: new Date().toISOString() }],
         disciplines: ['Electrical', 'Civil', 'Mechanical', 'SCADA & Telecom', 'Protection & Control', 'Structural', 'Other'],
       });
+      // the log is append-only and survives a reset; this entry marks where the fresh start is
+      addLog('Workspace reset — fresh start.');
 
       // 3. make sure the shared database has saved before saying we're done
       await new Promise(r => setTimeout(r, 400));
@@ -359,6 +361,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                 </div>
               </div>
             ))}
+            {logHasMore && <LoadMore onLoad={loadMoreLog} />}
           </div>
         )}
 
