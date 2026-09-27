@@ -4,7 +4,7 @@ import { FileSpreadsheet, Download, Upload, Flag, Trash2, FileUp, Columns3, Sear
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { uploadFile } from '../utils/uploadFile';
-import { isExternal } from '../utils/workflow';
+import { isExternal, dueState } from '../utils/workflow';
 import { mdlColumns, cellValue, compareCells, normValue, PRIORITY_COLORS } from '../utils/mdl';
 import { exportWorkbook, templateWorkbook } from '../utils/mdlImport';
 import { MdlColumnsSettings } from './MdlColumnsSettings';
@@ -220,6 +220,15 @@ export function MDLView({ projectId }) {
       return <span className="stage-chip" style={{ background: p.bg, color: p.fg, borderColor: p.border }}>{v}</span>;
     }
     if (c.key === 'title') return <span style={{ fontWeight: 500 }}>{v}</span>;
+    if (c.derive === 'dueDate' && v) {
+      const due = dueState(dwg.review);
+      return (
+        <span style={{ fontSize: '12px', whiteSpace: 'nowrap', color: due.kind === 'overdue' ? 'var(--error)' : 'var(--text-secondary)', fontWeight: due.kind === 'overdue' ? 600 : undefined, cursor: dwg.review?.dueSource ? 'help' : undefined }}
+          title={dwg.review?.dueSource ? `Source: ${dwg.review.dueSource}` : undefined}>
+          {String(v)}{dwg.review?.dueSource && dwg.review.dueSource !== 'project default' ? ' *' : ''}
+        </span>
+      );
+    }
     return <span style={{ fontSize: '12px', color: c.source === 'workflow' ? 'var(--text-secondary)' : undefined }}>{String(v)}</span>;
   };
 

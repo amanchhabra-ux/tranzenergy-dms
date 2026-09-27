@@ -1,7 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
-import { X, FileSpreadsheet, Upload, Trash2 } from 'lucide-react';
-import { defaultWorkflow, EXTERNAL_ROLE } from '../utils/workflow';
+import { X, FileSpreadsheet, Upload, Trash2, ArrowUp, ArrowDown, Plus } from 'lucide-react';
+import { defaultWorkflow, EXTERNAL_ROLE, DEFAULT_CATEGORIES, AEL_CATEGORIES, categoriesInUse } from '../utils/workflow';
 import { uploadCrsFile } from '../utils/uploadFile';
 import { readCrs } from '../utils/crs';
 
@@ -14,8 +14,22 @@ const ROLE_ROWS = [
 ];
 
 export function WorkflowSettings({ project, onClose }) {
-  const { users, updateWorkflow, updateProject } = useContext(AppContext);
+  const { users, drawings, updateWorkflow, updateProject } = useContext(AppContext);
   const [wf, setWf] = useState(() => ({ ...defaultWorkflow(), enabled: false, ...(project.workflow || {}) }));
+  // the project's category list; a project that never set one keeps the default list
+  // (and wf.categories stays unset) unless the list is edited here
+  const [cats, setCats] = useState(() => (project.workflow?.categories?.length ? project.workflow.categories : DEFAULT_CATEGORIES).map(c => ({ ...c })));
+  const [catsTouched, setCatsTouched] = useState(false);
+  const [catMsg, setCatMsg] = useState('');
+  const used = categoriesInUse(drawings, project.id);
+  const editCats = (fn) => { setCats(prev => fn(prev.map(c => ({ ...c })))); setCatsTouched(true); setCatMsg(''); };
+  const setCat = (i, k, v) => editCats(list => { list[i][k] = v; return list; });
+  const moveCat = (i, d) => editCats(list => { const j = i + d; if (j < 0 || j >= list.length) return list; [list[i], list[j]] = [list[j], list[i]]; return list; });
+  const presetCats = (preset, name) => {
+    const missing = [...used].filter(k => !preset.some(c => c.key === k));
+    if (missing.length) { setCatMsg(`⚠️ Cannot apply ${name}: reviews on this project use ${missing.join(', ')}, which it does not have.`); return; }
+    editCats(() => preset.map(c => ({ ...c })));
+  };
   const [busy, setBusy] = useState(false);
   const [tplMsg, setTplMsg] = useState('');
   const set = (k, v) => setWf(w => ({ ...w, [k]: v }));
@@ -40,10 +54,21 @@ export function WorkflowSettings({ project, onClose }) {
   };
 
   const save = () => {
+    let categories = null;
+    if (catsTouched) {
+      const list = cats.map(c => ({ key: String(c.key || '').trim(), label: String(c.label || '').trim(), desc: String(c.desc || '').trim(), closes: c.closes === true }))
+        .map(c => ({ ...c, label: c.label || `Category ${c.key}` }));
+      const keys = list.map(c => c.key);
+      if (!list.length || keys.some(k => !k)) { setCatMsg('⚠️ Every category needs a key.'); return; }
+      if (new Set(keys).size !== keys.length) { setCatMsg('⚠️ Two categories have the same key.'); return; }
+      const lost = [...used].filter(k => !keys.includes(k));
+      if (lost.length) { setCatMsg(`⚠️ Reviews on this project use ${lost.join(', ')}: keep ${lost.length === 1 ? 'it' : 'them'} in the list.`); return; }
+      categories = list;
+    }
     const turnaroundDays = Math.max(1, parseInt(wf.turnaroundDays, 10) || 14);
     const issueNotation = String(wf.issueNotation || '').trim();
     const categoryFormat = String(wf.categoryFormat || '').trim();
-    updateWorkflow(project.id, { ...wf, turnaroundDays, issueNotation, categoryFormat });
+    updateWorkflow(project.id, { ...wf, turnaroundDays, issueNotation, categoryFormat, ...(categories ? { categories } : {}) });
     // everyone in the workflow needs access to the project
     const people = new Set([...(project.assignedUsers || []), ...ROLE_ROWS.flatMap(r => wf[r.key] || [])]);
     if (people.size !== (project.assignedUsers || []).length) updateProject(project.id, { assignedUsers: [...people] });
@@ -112,8 +137,42 @@ export function WorkflowSettings({ project, onClose }) {
             <div className="form-group">
               <label className="form-label">Category format</label>
               <input className="form-input" value={wf.categoryFormat || ''} onChange={e => set('categoryFormat', e.target.value)} placeholder="Category {key}" />
-              <div className="wf-hint">How a category is written on the sheet and in the MDL; {'{key}'} becomes 1, 2, 3, 4B… e.g. Category-{'{key}'}</div>
+              <div className="wf-hint">Used only while the project has no category list of its own (below, whose labels win); {'{key}'} becomes 1, 2, 3, 4B… e.g. Category-{'{key}'}</div>
             </div>
+          </div>
+
+          <div className="wf-role">
+            <div className="wf-role-head">
+              <span className="wf-step" style={{ fontSize: 9 }}>CAT</span>
+              <div><strong>Review categories</strong><div className="wf-hint">The categories the client issues and we propose, in this order. "Closes" ends the review; any other category waits for a resubmission. A category a review uses cannot be deleted or re-keyed.</div></div>
+            </div>
+            <table className="wf-cats">
+              <thead><tr><th>Key</th><th>Label</th><th>Description</th><th title="The review closes on this category">Closes</th><th /></tr></thead>
+              <tbody>
+                {cats.map((c, i) => {
+                  const inUse = used.has(String(c.key));
+                  return (
+                    <tr key={i}>
+                      <td><input className="form-input" style={{ width: 64 }} value={c.key} readOnly={inUse} title={inUse ? 'Used by a review' : ''} onChange={e => setCat(i, 'key', e.target.value)} aria-label="Category key" /></td>
+                      <td><input className="form-input" style={{ width: 130 }} value={c.label || ''} onChange={e => setCat(i, 'label', e.target.value)} placeholder={`Category ${c.key}`} aria-label="Category label" /></td>
+                      <td><input className="form-input" value={c.desc || ''} onChange={e => setCat(i, 'desc', e.target.value)} aria-label="Category description" /></td>
+                      <td style={{ textAlign: 'center' }}><input type="checkbox" checked={c.closes === true} onChange={e => setCat(i, 'closes', e.target.checked)} aria-label="Closes the review" /></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn btn-ghost btn-icon" title="Move up" disabled={i === 0} onClick={() => moveCat(i, -1)}><ArrowUp size={13} /></button>
+                        <button className="btn btn-ghost btn-icon" title="Move down" disabled={i === cats.length - 1} onClick={() => moveCat(i, 1)}><ArrowDown size={13} /></button>
+                        <button className="btn btn-ghost btn-icon" title={inUse ? 'Used by a review: cannot be deleted' : 'Delete'} disabled={inUse} onClick={() => editCats(list => list.filter((_, j) => j !== i))}><Trash2 size={13} /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => editCats(list => [...list, { key: '', label: '', desc: '', closes: false }])}><Plus size={13} /> Add category</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => presetCats(AEL_CATEGORIES, 'the AEL legend')}>AEL legend (TE-002)</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => presetCats(DEFAULT_CATEGORIES, 'the default list')}>Default list</button>
+            </div>
+            {catMsg && <div className="wf-hint" style={{ marginTop: 6, color: 'var(--error)' }}>{catMsg}</div>}
           </div>
 
           <label className="wf-switch" style={{ background: '#fff', borderColor: 'var(--border)' }}>

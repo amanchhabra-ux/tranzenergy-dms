@@ -2037,3 +2037,15 @@ body.dms-focus .revision-timeline > .comments-toggle { display: inline-flex !imp
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .review-note-label { font-weight: 700; color: #b45309; margin-right: 4px; }
+
+/* Workflow settings: review categories */
+.wf-cats { width: 100%; border-collapse: collapse; font-size: 12px; }
+.wf-cats th { text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; padding: 4px; }
+.wf-cats td { padding: 3px 4px; vertical-align: middle; }
+.wf-cats .form-input { padding: 4px 6px; font-size: 12px; }
+.wf-cats td:nth-child(3) .form-input { width: 100%; }
+.tracker-table tbody tr.tracker-overdue { background: var(--error-glow); box-shadow: inset 3px 0 0 var(--error); }
+.tracker-table tbody tr.tracker-overdue:hover { background: #fde2e2; }
+
+/* Admin panel: server configuration warning */
+.admin-warning { margin: 10px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px; background: var(--error-glow); color: var(--error); border: 1px solid #fecaca; }

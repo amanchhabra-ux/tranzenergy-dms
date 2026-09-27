@@ -3,7 +3,7 @@ import { AppContext } from '../AppContext';
 import { PlayCircle, AlertTriangle, Inbox, ChevronRight } from 'lucide-react';
 import { TAG, describe } from '../utils/activity';
 import {
-  STAGE, stageName, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
+  STAGE, stageName, categoryText, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
 } from '../utils/workflow';
 
 const FILTERS = [
@@ -74,20 +74,24 @@ export function ReviewTracker({ project, onOpenDrawing }) {
       <div className="tracker-table-wrap">
         <table className="tracker-table">
           <thead>
-            <tr><th>Drawing</th><th>Rev</th><th>Stage</th><th>With</th><th>Due</th><th>Comments</th><th /></tr>
+            <tr><th>Drawing</th><th>Rev</th><th>Stage</th><th>With</th><th title="Our proposed category, on the issued sheet">Proposed</th><th>Due</th><th>Comments</th><th /></tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={7} className="tracker-empty">Nothing here.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={8} className="tracker-empty">Nothing here.</td></tr>}
             {shown.map(({ d, r, due }) => {
               const who = r && r.stage !== 'closed' ? stageActors(project, r.stage).map(name).filter(Boolean) : [];
               const open = openCommentCount(d);
               return (
-                <tr key={d.id} onClick={() => onOpenDrawing(d.id)}>
+                <tr key={d.id} onClick={() => onOpenDrawing(d.id)} className={due.kind === 'overdue' ? 'tracker-overdue' : undefined}>
                   <td><div className="tracker-code">{d.code}</div><div className="tracker-title">{d.title}</div></td>
                   <td>{d.currentVersion}{r?.cycle > 1 ? <div className="tracker-sub">cycle {r.cycle}</div> : null}</td>
                   <td><StageChip review={r} project={project} /></td>
                   <td className="tracker-sub">{who.join(', ') || '—'}</td>
-                  <td>{due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">—</span>}</td>
+                  <td className="tracker-sub">{r?.proposedCategory ? categoryText(r.proposedCategory, project.workflow) : '—'}</td>
+                  <td title={r?.dueSource ? `Source: ${r.dueSource}` : undefined}>
+                    {due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">{r?.dueDate || '—'}</span>}
+                    {r?.dueDate && due.kind !== 'none' && <div className="tracker-sub">{r.dueDate}{r.dueSource ? ` · ${r.dueSource}` : ''}</div>}
+                  </td>
                   <td className="tracker-sub">{open ? `${open} open` : '—'}</td>
                   <td><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
                 </tr>
@@ -108,7 +112,7 @@ const WHEN = (iso) => {
 };
 const EVENT_TEXT = {
   registered: 'registered', resubmitted: 'new revision received', advanced: 'handed over', issued: 'CRS submitted',
-  category: 'category recorded', due: 'due date changed', moved: 'stage changed',
+  category: 'category recorded', due: 'due date changed', moved: 'stage changed', proposed: 'proposed category set',
 };
 
 /** Page: everything waiting on the signed-in person, plus recent review activity. */
@@ -179,7 +183,7 @@ export function MyReviews({ onOpenDrawing }) {
                 <span className="act-tag review">Review</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <strong>{d.code}</strong> {d.currentVersion} — {EVENT_TEXT[h.action] || h.action}
-                  {h.to && h.action !== 'category' ? ` → ${STAGE[h.to]?.label}` : ''}{h.category ? ` · Category ${h.category}` : ''}
+                  {h.to && h.action !== 'category' ? ` → ${STAGE[h.to]?.label}` : ''}{h.category ? ` · ${categoryText(h.category, p?.workflow)}` : ''}
                   <span className="tracker-sub"> · {h.byName}</span>
                 </span>
               </button>

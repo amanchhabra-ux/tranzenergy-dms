@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { categoryText } from './workflow.js';
 
 // ─── Comment Resolution Sheet helpers ───────────────────────────────────────
 
@@ -449,12 +450,8 @@ function planMetaWrites(rows, values, headerIdx) {
   return cells;
 }
 
-/** "Category-3" style label for a category key, in the project's own notation. */
-function categoryLabel(key, wf) {
-  if (!key) return '';
-  const fmt = wf.categoryFormat || 'Category {key}';
-  return fmt.replace('{key}', key);
-}
+/** "Category-3" style label for a category key: the project's category list, else its categoryFormat. */
+const categoryLabel = (key, wf) => categoryText(key, wf);
 
 // Per-row columns some contractual templates carry
 const ISSUE_COLS = {

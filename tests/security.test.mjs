@@ -531,6 +531,235 @@ await test('a consultant comment marks the working Excel for rewrite by an inter
   assert.ok(d.crsRev > d.crsSyncedRev);
 });
 
+// ── PR 4: category list per project (workflow settings are admin-only) ─────────
+const AEL = [
+  { key: '1', label: 'Category-1', desc: 'Approved and Distributed.', closes: true },
+  { key: '3', label: 'Category-3', desc: 'Not approved.', closes: false },
+  { key: '4A', label: 'Category-4A', desc: 'Kept for record/ reference.', closes: true },
+];
+
+await test('Project Manager setting the category list -> 403; admin -> 200', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.projects[0].workflow.categories = AEL;
+  const r = await post(EMAIL.u2, { state: s, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(r.body.error, 'admin_only');
+  assert.equal(stored().projects[0].workflow.categories, undefined);
+  assert.equal((await post(EMAIL.u1, { state: s, etag: null })).statusCode, 200);
+  assert.deepEqual(stored().projects[0].workflow.categories, AEL);
+});
+
+await test('Viewer changing a category\'s closes flag -> 403', async () => {
+  const s0 = baseState();
+  s0.projects[0].workflow.categories = AEL;
+  seed(s0);
+  const s = structuredClone(s0);
+  s.projects[0].workflow.categories[0].closes = false;
+  assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 403);
+  assert.equal(stored().projects[0].workflow.categories[0].closes, true);
+});
+
+await test('consultant sending a category list -> ignored', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  v.projects[0].workflow.categories = AEL;
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().projects[0].workflow.categories, undefined);
+});
+
+// ── PR 4: our proposed category ────────────────────────────────────────────────
+const atStage = (stage, extra = {}) => {
+  const s = baseState();
+  Object.assign(s.drawings[0].review, { stage, category: null, proposedCategory: '3',
+    history: [{ id: 'h1', action: 'registered' }, { id: 'hp', action: 'proposed', category: '3', by: 'u1' }] }, extra);
+  return s;
+};
+
+await test('consultant changing our proposed category (with the client step) -> kept', async () => {
+  seed(atStage('consultant'));
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  assert.equal(d.review.proposedCategory, '3', 'visible to the consultant after issue');
+  d.review = { ...d.review, stage: 'client', proposedCategory: '1' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.stage, 'client');
+  assert.equal(rv.proposedCategory, '3');
+});
+
+await test('consultant changing our proposed category alone -> kept', async () => {
+  seed(atStage('client'));
+  const v = viewOf('u7');
+  v.drawings.find(x => x.id === 'd1').review.proposedCategory = '1';
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().drawings[0].review.proposedCategory, '3');
+});
+
+await test('before issue the consultant does not see our proposed category', async () => {
+  seed(atStage('ir2'));
+  const rv = viewOf('u7').drawings.find(x => x.id === 'd1').review;
+  assert.equal(rv.proposedCategory, null);
+  assert.ok(!rv.history.some(h => h.action === 'proposed'));
+  // and their save of that view leaves ours in place
+  const v = viewOf('u7');
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().drawings[0].review.proposedCategory, '3');
+  assert.ok(stored().drawings[0].review.history.some(h => h.id === 'hp'));
+});
+
+// ── PR 4: due date and its source ──────────────────────────────────────────────
+await test('consultant changing dueDate / dueSource while forwarding to the client -> kept', async () => {
+  seed(atStage('consultant', { dueDate: '2026-10-04', dueSource: 'Atlanta email 24.09.2026: by 30.09' }));
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.review = { ...d.review, stage: 'client', dueDate: '2099-12-31', dueSource: 'agreed by phone' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.stage, 'client');
+  assert.equal(rv.dueDate, '2026-10-04');
+  assert.equal(rv.dueSource, 'Atlanta email 24.09.2026: by 30.09');
+});
+
+await test('consultant changing dueDate / dueSource alone, at any stage -> kept', async () => {
+  for (const stage of ['ir1', 'consultant', 'client']) {
+    seed(atStage(stage, { dueDate: '2026-10-04', dueSource: 'project default' }));
+    const v = viewOf('u7');
+    const d = v.drawings.find(x => x.id === 'd1');
+    d.review = { ...d.review, dueDate: '2099-12-31', dueSource: 'forged',
+      history: [...d.review.history, { id: 'forgedDue', action: 'due', oldDue: '2026-10-04', newDue: '2099-12-31' }] };
+    assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+    const rv = stored().drawings[0].review;
+    assert.deepEqual([stage, rv.dueDate, rv.dueSource], [stage, '2026-10-04', 'project default']);
+    assert.ok(!rv.history.some(h => h.id === 'forgedDue'));
+  }
+});
+
+await test('consultant new revision: due date and source set by the server ("project default")', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  const d = newRevision(v, PDF('drawings/E-001/1727000000000123999_sld_r1.pdf'));
+  d.review = { ...d.review, dueDate: '2099-01-01', dueSource: 'forged' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.dueDate, addDaysIso(10));
+  assert.equal(rv.dueSource, 'project default');
+});
+
+// ── PR 4: first admin password without a public password ───────────────────────
+const auth = (await import('../api/auth.js')).default;
+const { hashPassword } = await import('../api/_lib/creds.js');
+const credsFile = path.join(dir, 'auth_credentials.json');
+const setCreds = (users) => { fs.writeFileSync(credsFile, JSON.stringify({ users })); forgetMembers(); };
+const login = async (email, password) => {
+  const res = mockRes();
+  await auth({ method: 'POST', headers: { host: 'localhost' }, body: { action: 'login', email, password } }, res);
+  return res;
+};
+async function withEnv(vars, fn) {
+  const keep = Object.fromEntries(Object.keys(vars).map(k => [k, process.env[k]]));
+  Object.entries(vars).forEach(([k, v]) => (v == null ? delete process.env[k] : (process.env[k] = v)));
+  try { return await fn(); } finally { Object.entries(keep).forEach(([k, v]) => (v == null ? delete process.env[k] : (process.env[k] = v))); }
+}
+
+await test('the old public password admin123 no longer signs anyone in', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'admin123')).statusCode, 401);
+  });
+});
+
+await test('existing admin with a password: unaffected; no bootstrap even with the token', async () => {
+  seed(baseState());
+  setCreds({ [EMAIL.u1]: { ...hashPassword('Correct-horse-9'), pwv: 3 } });
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: 'tok-123456789' }, async () => {
+    const ok = await login(EMAIL.u1, 'Correct-horse-9');
+    assert.equal(ok.statusCode, 200);
+    assert.ok(!ok.body.mustChangePassword);
+    assert.equal((await login(EMAIL.u1, 'tok-123456789')).statusCode, 401);
+    assert.equal((await login(EMAIL.u1, 'admin123')).statusCode, 401);
+    // another admin-listed email without a password cannot bootstrap either
+    process.env.ADMIN_EMAILS = `${EMAIL.u1},new-admin@tranzenergy.in`;
+    assert.equal((await login('new-admin@tranzenergy.in', 'tok-123456789')).statusCode, 401);
+    assert.equal((await login('new-admin@tranzenergy.in', 'anything-at-all')).statusCode, 401);
+  });
+});
+
+await test('bootstrap without the token: refused for an email not in ADMIN_EMAILS', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: 'someone-else@tranzenergy.in', ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401, 'Admin by role, not in ADMIN_EMAILS');
+    assert.equal((await login(EMAIL.u2, 'whatever-123')).statusCode, 401, 'not an admin');
+  });
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401, 'ADMIN_EMAILS unset');
+  });
+});
+
+await test('bootstrap without the token: refused once any workspace user has a password', async () => {
+  seed(baseState());
+  setCreds({ [EMAIL.u2]: { ...hashPassword('Pm-password-77'), pwv: 1 } });
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    assert.equal((await login(EMAIL.u1, 'whatever-123')).statusCode, 401);
+  });
+});
+
+await test('bootstrap without the token, brand-new deployment: ADMIN_EMAILS admin sets the first password once', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: EMAIL.u1, ADMIN_BOOTSTRAP_TOKEN: null }, async () => {
+    const r = await login(EMAIL.u1, 'first-time');
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.body.mustChangePassword, true);
+    const cookie = String(r.headers['Set-Cookie']).split(';')[0];
+    // the setup session opens nothing but the password change
+    const blocked = mockRes();
+    await saveState({ method: 'POST', headers: { cookie, host: 'localhost' }, body: { state: baseState(), etag: null } }, blocked);
+    assert.equal(blocked.statusCode, 403);
+    const change = async () => { const res = mockRes(); await auth({ method: 'POST', headers: { cookie, host: 'localhost' }, body: { action: 'change-password', newPassword: 'A-real-password-42' } }, res); return res; };
+    assert.equal((await change()).statusCode, 200);
+    assert.equal((await change()).statusCode, 401, 'the setup session is spent once a password exists');
+    assert.equal((await login(EMAIL.u1, 'A-real-password-42')).statusCode, 200);
+    assert.equal((await login(EMAIL.u1, 'first-time')).statusCode, 401);
+  });
+});
+
+await test('bootstrap with ADMIN_BOOTSTRAP_TOKEN: only the token, only for an admin', async () => {
+  seed(baseState());
+  setCreds({});
+  await withEnv({ ADMIN_EMAILS: null, ADMIN_BOOTSTRAP_TOKEN: 'tok-123456789' }, async () => {
+    assert.equal((await login(EMAIL.u1, 'wrong-token')).statusCode, 401);
+    assert.equal((await login(EMAIL.u1, '')).statusCode, 401);
+    assert.equal((await login(EMAIL.u2, 'tok-123456789')).statusCode, 401, 'not an admin');
+    assert.equal((await login(EMAIL.u7, 'tok-123456789')).statusCode, 401, 'consultant');
+    const r = await login(EMAIL.u1, 'tok-123456789');
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.body.mustChangePassword, true);
+  });
+});
+
+await test('SESSION_SECRET unset with a storage key: flagged to admins by /api/me, sign-in still works', async () => {
+  seed(baseState());
+  const me = (await import('../api/me.js')).default;
+  const { sessionSecretMissing } = await import('../api/_lib/session.js');
+  const warn = console.warn; console.warn = () => {};
+  try {
+    await withEnv({ SESSION_SECRET: null, R2_SECRET_ACCESS_KEY: 'r2-secret' }, async () => {
+      assert.equal(sessionSecretMissing(), true);
+      const get = async (email) => { const res = mockRes(); await me({ method: 'GET', headers: { cookie: makeSessionCookie(email, { secure: false }).split(';')[0], host: 'localhost' } }, res); return res.body; };
+      const a = await get(EMAIL.u1);
+      assert.equal(a.signedIn, true);
+      assert.deepEqual(a.warnings, ['session_secret']);
+      assert.equal((await get(EMAIL.u2)).warnings, undefined, 'not shown to non-admins');
+    });
+    await withEnv({ SESSION_SECRET: 'a-long-random-secret', R2_SECRET_ACCESS_KEY: 'r2-secret' }, async () => {
+      assert.equal(sessionSecretMissing(), false);
+    });
+  } finally { console.warn = warn; }
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });

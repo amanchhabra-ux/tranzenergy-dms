@@ -4,9 +4,23 @@ import crypto from 'node:crypto';
 const COOKIE = 'dms_session';
 const MAX_AGE = 14 * 24 * 3600; // 14 days
 
+/**
+ * SESSION_SECRET unset: cookies are signed with a storage key instead (Vercel Blob token or
+ * R2 secret). Sign-in keeps working, so a deploy never locks anyone out, but the key does
+ * two jobs and rotating it signs everyone out. /api/me reports it to admins and the Admin
+ * panel shows a banner. Setting SESSION_SECRET signs everyone out once.
+ */
+export const sessionSecretMissing = () =>
+  !process.env.SESSION_SECRET && !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.R2_SECRET_ACCESS_KEY);
+let warned = false;
+
 function secret() {
   const s = process.env.SESSION_SECRET || process.env.BLOB_READ_WRITE_TOKEN || process.env.R2_SECRET_ACCESS_KEY || process.env.LOCAL_SESSION_SECRET;
   if (!s) throw new Error('No session secret configured');
+  if (!warned && sessionSecretMissing()) {
+    warned = true;
+    console.warn('[session] SESSION_SECRET is not set: sign-in cookies are signed with a storage key. Set SESSION_SECRET in Vercel (everyone is signed out once).');
+  }
   return crypto.createHash('sha256').update('dms-session:' + s).digest();
 }
 const b64u = (buf) => Buffer.from(buf).toString('base64url');

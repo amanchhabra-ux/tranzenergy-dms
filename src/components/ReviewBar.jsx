@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { AppContext } from '../AppContext';
 import { X, Clock, History, Send, CheckCircle2, Flag, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import {
-  STAGE, CATEGORIES, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
-  dueState, today, openCommentCount, finalCheckOn, issuingStage, stageName,
+  STAGE, categoriesOf, findCategory, categoryText, NEXT_STAGE, workflowOn, isExternal, canActOnStage, stageActors,
+  dueState, today, openCommentCount, canEditDue, finalCheckOn, issuingStage, stageName,
 } from '../utils/workflow';
 
 const shortName = (s, fallback) => (s || fallback).replace(/\s*\(.*\)\s*$/, '');
@@ -71,8 +71,10 @@ export function ReviewBar({ drawing }) {
   const assigned = stageActors(project, r.stage);
   const mine = canActOnStage(currentUser, project, r.stage) && (assigned.includes(currentUser?.id) || !assigned.length);
   const stageInfo = STAGE[r.stage];
-  const cat = r.category && CATEGORIES.find(c => c.key === r.category);
-  const openLeft = r.stage === 'closed' && r.category === '2' ? openCommentCount(drawing) : 0;
+  const cat = r.category ? { label: categoryText(r.category, wf) } : null;
+  // a closed review can still hold open comments (approved with comments): track them to closure
+  const openLeft = r.stage === 'closed' ? openCommentCount(drawing) : 0;
+  const mayEditDue = canEditDue(currentUser, project);
 
   let action = null;
   if (mine && !done) {
@@ -99,6 +101,9 @@ export function ReviewBar({ drawing }) {
 
       <div className="review-status">
         <span className="review-cycle">{r.version}{r.cycle > 1 ? ` · cycle ${r.cycle}` : ''}</span>
+        {r.proposedCategory && (
+          <span className="badge badge-primary review-proposed" title="Our proposed category (issued sheet, Review Status)">Proposed: {categoryText(r.proposedCategory, wf)}</span>
+        )}
         {done && cat && <span className="badge badge-success">{cat.label}{openLeft ? ` · ${openLeft} to close` : ''}</span>}
         {r.stage === 'resubmit' && cat && <span className="badge badge-warning">{cat.label} · awaiting resubmission</span>}
         {!done && r.stage !== 'resubmit' && (
@@ -107,7 +112,8 @@ export function ReviewBar({ drawing }) {
           </span>
         )}
         {due.kind !== 'none' && (
-          <button className={`review-due ${due.kind}`} onClick={() => (canDo('manage_projects') || mine) && !external ? setModal('due') : null} title={`Due ${r.dueDate}`}>
+          <button className={`review-due ${due.kind}`} onClick={() => (mayEditDue ? setModal('due') : null)} style={mayEditDue ? undefined : { cursor: 'default' }}
+            title={`Due ${r.dueDate}${r.dueSource ? ` · source: ${r.dueSource}` : ''}${mayEditDue ? ' · click to change' : ''}`}>
             {due.kind === 'overdue' ? <AlertTriangle size={12} /> : <Clock size={12} />} {due.text}
           </button>
         )}
@@ -207,18 +213,21 @@ function IssueModal({ drawing, project, onClose }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const wf = project.workflow;
+  const cats = categoriesOf(wf);
+  const [proposed, setProposed] = useState(() => (findCategory(wf, drawing.review.proposedCategory) ? drawing.review.proposedCategory : ''));
   const count = (drawing.pins || []).filter(p => (p.comments || []).length).length + (drawing.crsImported || []).filter(c => String(c.comment || '').trim()).length;
   const notify = [...new Set([...(wf.consultantUsers || []), ...(wf.issueNotify || [])])].map(id => users.find(u => u.id === id)?.name).filter(Boolean);
   const go = async () => {
     setBusy(true); setErr('');
-    try { await issueToConsultant(drawing.id, note.trim()); onClose(); }
+    if (!proposed) { setErr('Pick our proposed category first.'); return; }
+    try { await issueToConsultant(drawing.id, note.trim(), proposed); onClose(); }
     catch (e) { console.error(e); setErr(e.message || 'Could not build the CRS'); setBusy(false); }
   };
   return (
     <Modal title={finalCheckOn(wf) ? `Submit to ${shortName(wf.consultantName, 'consultant')}` : `Review done — ready for ${shortName(wf.consultantName, 'consultant')}`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={busy ? () => {} : onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button className="btn btn-primary" onClick={go} disabled={busy}>
+        <button className="btn btn-primary" onClick={go} disabled={busy || !proposed}>
           {busy ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Building the CRS…</> : <><Send size={14} /> {finalCheckOn(wf) ? 'Submit' : `Send CRS to ${shortName(wf.consultantName, 'consultant')}`}</>}
         </button>
       </>}>
@@ -228,6 +237,14 @@ function IssueModal({ drawing, project, onClose }) {
         <li>Notified: {notify.length ? notify.join(', ') : <em>nobody set up yet — see Workflow settings</em>}.</li>
         <li>{shortName(wf.consultantName, 'The consultant')} then sends it to {shortName(wf.clientName, 'the client')}.</li>
       </ul>
+      <div className="form-group">
+        <label className="form-label" htmlFor="proposed-cat">Our proposed category</label>
+        <select id="proposed-cat" className="form-input" value={proposed} onChange={e => { setProposed(e.target.value); setErr(''); }}>
+          <option value="">Pick a category…</option>
+          {cats.map(c => <option key={c.key} value={c.key}>{categoryText(c.key, wf)}{c.desc ? ` — ${c.desc}` : ''}</option>)}
+        </select>
+        <div className="wf-hint">Written in the sheet's Review Status and in the MDL's TE category. {shortName(wf.consultantName, 'The consultant')} sees it on the issued sheet and cannot change it.</div>
+      </div>
       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Check the merged comments in the CRS view first. A copy of the sheet as sent is kept with the review history.</p>
       <NoteField value={note} onChange={setNote} placeholder="Covering note for the consultant" />
       {err && <div className="review-error">⚠️ {err}</div>}
@@ -241,6 +258,8 @@ function CategoryModal({ drawing, project, onClose }) {
   const [note, setNote] = useState('');
   const [date, setDate] = useState(today());
   const client = shortName(project.workflow.clientName, 'Client');
+  const list = categoriesOf(project.workflow);
+  const picked = findCategory(project.workflow, cat);
   return (
     <Modal title={`${client} review category`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
       footer={<>
@@ -250,17 +269,17 @@ function CategoryModal({ drawing, project, onClose }) {
         </button>
       </>}>
       <div className="review-cats">
-        {CATEGORIES.map(c => (
+        {list.map(c => (
           <label key={c.key} className={`review-cat ${cat === c.key ? 'on' : ''} ${c.closes ? 'ok' : 'bad'}`}>
             <input type="radio" name="cat" value={c.key} checked={cat === c.key} onChange={() => setCat(c.key)} />
             <span><strong>{c.label}</strong><br /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.desc}</span></span>
           </label>
         ))}
       </div>
-      {cat && (
+      {picked && (
         <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {CATEGORIES.find(c => c.key === cat).closes
-            ? (cat === '2' ? 'The review closes; open comments stay tracked until they are resolved.' : 'The review closes.')
+          {picked.closes
+            ? (openCommentCount(drawing) ? 'The review closes; open comments stay tracked until they are resolved.' : 'The review closes.')
             : 'The drawing waits for the contractor to resubmit. The next revision restarts the review with these comments carried forward.'}
         </p>
       )}
@@ -276,16 +295,29 @@ function CategoryModal({ drawing, project, onClose }) {
 function DueModal({ drawing, onClose }) {
   const { setReviewDue } = useContext(AppContext);
   const [date, setDate] = useState(drawing.review.dueDate || today());
+  const [source, setSource] = useState(drawing.review.dueSource || '');
+  const [err, setErr] = useState('');
+  const save = () => {
+    if (!date) { setErr('Pick a date.'); return; }
+    if (setReviewDue(drawing.id, date, source.trim()) === false) { setErr('Could not change the due date.'); return; }
+    onClose();
+  };
   return (
     <Modal title="Change due date" sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => { setReviewDue(drawing.id, date); onClose(); }}>Save</button>
+        <button className="btn btn-primary" onClick={save}>Save</button>
       </>}>
-      <div className="form-group" style={{ marginBottom: 0 }}>
-        <label className="form-label">Due date</label>
-        <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} />
+      <div className="form-group">
+        <label className="form-label" htmlFor="due-date">Due date</label>
+        <input id="due-date" type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} />
       </div>
+      <div className="form-group" style={{ marginBottom: 0 }}>
+        <label className="form-label" htmlFor="due-source">Source</label>
+        <input id="due-source" className="form-input" value={source} onChange={e => setSource(e.target.value)} placeholder="e.g. Atlanta email 24.09.2026: by 30.09" maxLength={500} />
+        <div className="wf-hint">Where the date comes from. The change and the old values go into the review history.</div>
+      </div>
+      {err && <div className="review-error">⚠️ {err}</div>}
     </Modal>
   );
 }
@@ -316,6 +348,7 @@ const ACTION_TEXT = {
   resubmitted: 'New revision received — review restarted',
   advanced: 'Handed over',
   issued: 'CRS submitted to the consultant',
+  proposed: 'Proposed category set',
   category: 'Client category recorded',
   due: 'Due date changed',
   moved: 'Stage changed',
@@ -335,7 +368,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
         <div className="review-cycles">
           {r.cycles.map(c => (
             <div key={c.cycle} className="review-cycle-row">
-              <strong>{c.version}</strong> · cycle {c.cycle} · {c.category ? `Category ${c.category}` : (STAGE[c.stage]?.label || c.stage)}
+              <strong>{c.version}</strong> · cycle {c.cycle} · {c.category ? categoryText(c.category, project.workflow) : (STAGE[c.stage]?.label || c.stage)}
               {c.issued?.url && <a href={dlHref(c.issued.url)} download={c.issued.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', c.issued.fileName)} className="review-link"><Download size={12} /> CRS as issued</a>}
             </div>
           ))}
@@ -348,7 +381,7 @@ function HistoryModal({ drawing, project, onClose, onChangeStage }) {
             <div>
               <div><strong>{h.byName}</strong> — {ACTION_TEXT[h.action] || h.action}
                 {h.from && h.to && h.action !== 'category' && <span style={{ color: 'var(--text-muted)' }}> ({STAGE[h.from]?.label} → {STAGE[h.to]?.label})</span>}
-                {h.category && <span> — <strong>Category {h.category}</strong>{h.decidedOn ? ` on ${h.decidedOn}` : ''}</span>}
+                {h.category && <span> — <strong>{categoryText(h.category, project.workflow)}</strong>{h.decidedOn ? ` on ${h.decidedOn}` : ''}</span>}
               </div>
               {h.note && <div className="review-history-note">{h.note}</div>}
               {h.crs?.url && <a href={dlHref(h.crs.url)} download={h.crs.fileName} onClick={() => recordDownload(drawing.id, 'issued-crs', h.crs.fileName)} className="review-link"><Download size={12} /> {h.crs.fileName}</a>}
