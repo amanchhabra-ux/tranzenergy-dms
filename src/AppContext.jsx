@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { mergeState, stateEquals } from './utils/mergeState';
 import { crsFieldUpdates, pinRowMapFromImport, syncCrsExcel, buildIssuedCrs } from './utils/crs';
-import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
+import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, categoryText, reviewWithCategory, reviewWithProposed, today, canActOnStage, EXTERNAL_ROLE, issuingStage, stageName, newReviewFor } from './utils/workflow';
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
@@ -912,18 +912,22 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   };
 
   // Steps 5–6: the approver submits; the CRS is issued in the contractual template
-  const issueToConsultant = async (drawingId, note = '') => {
+  // proposedCategory: our proposed category, picked by whoever issues (the approver, or the
+  // TE Review Engineer when there is no final check); it fills the sheet's Review Status
+  const issueToConsultant = async (drawingId, note = '', proposedCategory = null) => {
     const d = drawings.find(x => x.id === drawingId);
     const p = projectOf(d);
     const from = d?.review?.stage;
     if (!d || from !== issuingStage(p?.workflow) || !canAct(d)) throw new Error('Not allowed at this stage.');
+    const proposedKey = proposedCategory ?? d.review.proposedCategory;
+    if (!findCategory(p?.workflow, proposedKey)) throw new Error('Pick our proposed category first.');
     // publish TranzEnergy's comments, then build the sheet from what will be visible.
     // Comments read from an earlier Excel become sheet rows of their own in the new template.
     const pub = (o) => { if (!o || o.vis !== 'internal') return o; const { vis, ...rest } = o; return rest; };
     const asLocal = (c) => (c.local ? pub(c) : { ...pub(c), local: true, id: c.id || uid('crs'), row: undefined, sno: undefined });
     const pins = (d.pins || []).map(pin => ({ ...pub(pin), comments: (pin.comments || []).map(pub) }));
     const items = (d.crsImported || []).map(asLocal);
-    const published = { ...d, pins, crsImported: items, crsRowMap: {} };
+    const published = { ...d, pins, crsImported: items, crsRowMap: {}, review: { ...d.review, proposedCategory: findCategory(p?.workflow, proposedKey).key } };
     const { bytes, layout, rowMap, fileName } = await buildIssuedCrs(published, p);
     const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     // a frozen copy of what was sent, and a working copy that keeps syncing
@@ -945,10 +949,13 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
         crsData: workUrl, crsFileName: fileName, crsLayout: layout, crsRowMap: rowMap, crsFileType: 'excel',
         crsRev: 1, crsSyncedRev: 0, crsSyncError: null, crsClearRows: [],
         activity: [...(x.activity || []), ev('upload', { what: 'crs-issued', fileName, version: x.currentVersion })].slice(-ACTIVITY_CAP),
-        review: {
-          ...x.review, stage: 'consultant', issued: { ...issued, ...issuedMap },
-          history: [...(x.review.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
-        },
+        review: (() => {
+          const withCat = reviewWithProposed(x.review, p?.workflow, proposedKey, { entry: histEntry }) || x.review;
+          return {
+            ...withCat, stage: 'consultant', issued: { ...issued, ...issuedMap },
+            history: [...(withCat.history || []), histEntry('issued', { from, to: 'consultant', note, crs: issued })],
+          };
+        })(),
       };
     }));
     addLog(`<strong>${d.code}</strong> ${d.currentVersion}: CRS submitted to ${p?.workflow?.consultantName || 'the consultant'}.`);

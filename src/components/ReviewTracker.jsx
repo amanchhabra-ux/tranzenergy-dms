@@ -74,10 +74,10 @@ export function ReviewTracker({ project, onOpenDrawing }) {
       <div className="tracker-table-wrap">
         <table className="tracker-table">
           <thead>
-            <tr><th>Drawing</th><th>Rev</th><th>Stage</th><th>With</th><th>Due</th><th>Comments</th><th /></tr>
+            <tr><th>Drawing</th><th>Rev</th><th>Stage</th><th>With</th><th title="Our proposed category, on the issued sheet">Proposed</th><th>Due</th><th>Comments</th><th /></tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={7} className="tracker-empty">Nothing here.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={8} className="tracker-empty">Nothing here.</td></tr>}
             {shown.map(({ d, r, due }) => {
               const who = r && r.stage !== 'closed' ? stageActors(project, r.stage).map(name).filter(Boolean) : [];
               const open = openCommentCount(d);
@@ -87,6 +87,7 @@ export function ReviewTracker({ project, onOpenDrawing }) {
                   <td>{d.currentVersion}{r?.cycle > 1 ? <div className="tracker-sub">cycle {r.cycle}</div> : null}</td>
                   <td><StageChip review={r} project={project} /></td>
                   <td className="tracker-sub">{who.join(', ') || '—'}</td>
+                  <td className="tracker-sub">{r?.proposedCategory ? categoryText(r.proposedCategory, project.workflow) : '—'}</td>
                   <td>{due.kind !== 'none' ? <span className={`review-due ${due.kind}`}>{due.kind === 'overdue' && <AlertTriangle size={11} />} {due.text}</span> : <span className="tracker-sub">—</span>}</td>
                   <td className="tracker-sub">{open ? `${open} open` : '—'}</td>
                   <td><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
@@ -108,7 +109,7 @@ const WHEN = (iso) => {
 };
 const EVENT_TEXT = {
   registered: 'registered', resubmitted: 'new revision received', advanced: 'handed over', issued: 'CRS submitted',
-  category: 'category recorded', due: 'due date changed', moved: 'stage changed',
+  category: 'category recorded', due: 'due date changed', moved: 'stage changed', proposed: 'proposed category set',
 };
 
 /** Page: everything waiting on the signed-in person, plus recent review activity. */

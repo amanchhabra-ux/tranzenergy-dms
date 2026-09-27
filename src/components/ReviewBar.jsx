@@ -100,6 +100,9 @@ export function ReviewBar({ drawing }) {
 
       <div className="review-status">
         <span className="review-cycle">{r.version}{r.cycle > 1 ? ` · cycle ${r.cycle}` : ''}</span>
+        {r.proposedCategory && (
+          <span className="badge badge-primary review-proposed" title="Our proposed category (issued sheet, Review Status)">Proposed: {categoryText(r.proposedCategory, wf)}</span>
+        )}
         {done && cat && <span className="badge badge-success">{cat.label}{openLeft ? ` · ${openLeft} to close` : ''}</span>}
         {r.stage === 'resubmit' && cat && <span className="badge badge-warning">{cat.label} · awaiting resubmission</span>}
         {!done && r.stage !== 'resubmit' && (
@@ -208,18 +211,21 @@ function IssueModal({ drawing, project, onClose }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const wf = project.workflow;
+  const cats = categoriesOf(wf);
+  const [proposed, setProposed] = useState(() => (findCategory(wf, drawing.review.proposedCategory) ? drawing.review.proposedCategory : ''));
   const count = (drawing.pins || []).filter(p => (p.comments || []).length).length + (drawing.crsImported || []).filter(c => String(c.comment || '').trim()).length;
   const notify = [...new Set([...(wf.consultantUsers || []), ...(wf.issueNotify || [])])].map(id => users.find(u => u.id === id)?.name).filter(Boolean);
   const go = async () => {
     setBusy(true); setErr('');
-    try { await issueToConsultant(drawing.id, note.trim()); onClose(); }
+    if (!proposed) { setErr('Pick our proposed category first.'); return; }
+    try { await issueToConsultant(drawing.id, note.trim(), proposed); onClose(); }
     catch (e) { console.error(e); setErr(e.message || 'Could not build the CRS'); setBusy(false); }
   };
   return (
     <Modal title={finalCheckOn(wf) ? `Submit to ${shortName(wf.consultantName, 'consultant')}` : `Review done — ready for ${shortName(wf.consultantName, 'consultant')}`} sub={`${drawing.code} · ${drawing.currentVersion}`} onClose={busy ? () => {} : onClose}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button className="btn btn-primary" onClick={go} disabled={busy}>
+        <button className="btn btn-primary" onClick={go} disabled={busy || !proposed}>
           {busy ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Building the CRS…</> : <><Send size={14} /> {finalCheckOn(wf) ? 'Submit' : `Send CRS to ${shortName(wf.consultantName, 'consultant')}`}</>}
         </button>
       </>}>
@@ -229,6 +235,14 @@ function IssueModal({ drawing, project, onClose }) {
         <li>Notified: {notify.length ? notify.join(', ') : <em>nobody set up yet — see Workflow settings</em>}.</li>
         <li>{shortName(wf.consultantName, 'The consultant')} then sends it to {shortName(wf.clientName, 'the client')}.</li>
       </ul>
+      <div className="form-group">
+        <label className="form-label" htmlFor="proposed-cat">Our proposed category</label>
+        <select id="proposed-cat" className="form-input" value={proposed} onChange={e => { setProposed(e.target.value); setErr(''); }}>
+          <option value="">Pick a category…</option>
+          {cats.map(c => <option key={c.key} value={c.key}>{categoryText(c.key, wf)}{c.desc ? ` — ${c.desc}` : ''}</option>)}
+        </select>
+        <div className="wf-hint">Written in the sheet's Review Status and in the MDL's TE category. {shortName(wf.consultantName, 'The consultant')} sees it on the issued sheet and cannot change it.</div>
+      </div>
       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Check the merged comments in the CRS view first. A copy of the sheet as sent is kept with the review history.</p>
       <NoteField value={note} onChange={setNote} placeholder="Covering note for the consultant" />
       {err && <div className="review-error">⚠️ {err}</div>}
@@ -319,6 +333,7 @@ const ACTION_TEXT = {
   resubmitted: 'New revision received — review restarted',
   advanced: 'Handed over',
   issued: 'CRS submitted to the consultant',
+  proposed: 'Proposed category set',
   category: 'Client category recorded',
   due: 'Due date changed',
   moved: 'Stage changed',

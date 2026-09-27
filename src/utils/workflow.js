@@ -83,6 +83,21 @@ export function reviewWithCategory(review, wf, key, { entry, note = '', decidedO
   };
 }
 
+/**
+ * Our proposed category, picked at the stage that issues the CRS (steps 4-5). It fills the
+ * issued sheet's Review Status and the MDL's "TE category". A history entry records it.
+ * null for a category outside the project's list.
+ */
+export function reviewWithProposed(review, wf, key, { entry } = {}) {
+  const cat = findCategory(wf, key);
+  if (!review || !cat) return null;
+  if (review.proposedCategory === cat.key) return review;
+  return {
+    ...review, proposedCategory: cat.key,
+    history: [...(review.history || []), entry('proposed', { category: cat.key, previous: review.proposedCategory || null })],
+  };
+}
+
 /** Keys a project's reviews use (current and archived cycles): these cannot be deleted from its list. */
 export function categoriesInUse(drawings, projectId) {
   const used = new Set();
@@ -148,14 +163,14 @@ export function newReviewFor(d, project, prev, { entry, note = '', by = '' } = {
   const days = Number(project?.workflow?.turnaroundDays) || DEFAULT_TURNAROUND_DAYS;
   const cycle = (prev?.cycle || 0) + 1;
   const archived = prev ? [...(prev.cycles || []), {
-    cycle: prev.cycle, version: prev.version, category: prev.category || null,
+    cycle: prev.cycle, version: prev.version, category: prev.category || null, proposedCategory: prev.proposedCategory || null,
     stage: prev.stage, closedAt: prev.closedAt || null, issued: prev.issued || null,
   }] : [];
   const carried = prev ? (d.pins || []).filter(p => (p.comments || []).length).length + (d.crsImported || []).filter(c => String(c.comment || '').trim()).length : 0;
   const subNote = String(note || '').trim();
   return {
     cycle, version: d.currentVersion || 'R0', stage: 'ir1',
-    startedAt: today(), dueDate: addDays(today(), days), category: null, issued: null,
+    startedAt: today(), dueDate: addDays(today(), days), category: null, proposedCategory: null, issued: null,
     // the uploader's note for the reviewers (step 1)
     note: subNote ? { text: subNote, by: by || 'Someone', at: new Date().toISOString() } : null,
     cycles: archived,

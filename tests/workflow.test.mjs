@@ -3,7 +3,7 @@
 //   node tests/workflow.test.mjs
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_CATEGORIES, AEL_CATEGORIES, categoriesOf, findCategory, categoryText, reviewWithCategory, categoriesInUse,
+  DEFAULT_CATEGORIES, AEL_CATEGORIES, categoriesOf, findCategory, categoryText, reviewWithCategory, reviewWithProposed, categoriesInUse, newReviewFor,
 } from '../src/utils/workflow.js';
 import { TE002_MDL_COLUMNS, cellValue } from '../src/utils/mdl.js';
 
@@ -91,6 +91,24 @@ test('categories in use (current and archived cycles) are listed, per project', 
     { projectId: 'p2', review: { category: '1' } },
   ];
   assert.deepEqual([...categoriesInUse(drawings, 'p1')].sort(), ['2', '3', '4B']);
+});
+
+// ── Proposed category at issue ───────────────────────────────────────────────
+test('proposed category: stored with a history entry; outside the list refused', () => {
+  const r0 = { stage: 'ir2', history: [] };
+  const r1 = reviewWithProposed(r0, ael.workflow, '2*', { entry });
+  assert.equal(r1.proposedCategory, '2*');
+  assert.deepEqual([r1.history.at(-1).action, r1.history.at(-1).category, r1.history.at(-1).previous], ['proposed', '2*', null]);
+  assert.equal(reviewWithProposed(r1, ael.workflow, '2*', { entry }), r1, 'same category: no new entry');
+  assert.equal(reviewWithProposed(r0, plain.workflow, '2*', { entry }), null);
+  assert.equal(cellValue(col('teCategory'), { review: r1 }, ael), 'Category-2*');
+});
+
+test('a new cycle clears the proposed category and archives the old one', () => {
+  const prev = { cycle: 1, version: 'R0', stage: 'resubmit', category: '3', proposedCategory: '2', history: [] };
+  const next = newReviewFor({ currentVersion: 'R1', pins: [], crsImported: [] }, { workflow: { turnaroundDays: 10 } }, prev, { entry });
+  assert.equal(next.proposedCategory, null);
+  assert.equal(next.cycles[0].proposedCategory, '2');
 });
 
 console.log(failed ? `\n${failed} of ${n} checks FAILED.` : `\nAll ${n} checks passed.`);

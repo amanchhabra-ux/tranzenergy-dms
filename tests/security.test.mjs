@@ -568,6 +568,46 @@ await test('consultant sending a category list -> ignored', async () => {
   assert.equal(stored().projects[0].workflow.categories, undefined);
 });
 
+// ── PR 4: our proposed category ────────────────────────────────────────────────
+const atStage = (stage, extra = {}) => {
+  const s = baseState();
+  Object.assign(s.drawings[0].review, { stage, category: null, proposedCategory: '3',
+    history: [{ id: 'h1', action: 'registered' }, { id: 'hp', action: 'proposed', category: '3', by: 'u1' }] }, extra);
+  return s;
+};
+
+await test('consultant changing our proposed category (with the client step) -> kept', async () => {
+  seed(atStage('consultant'));
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  assert.equal(d.review.proposedCategory, '3', 'visible to the consultant after issue');
+  d.review = { ...d.review, stage: 'client', proposedCategory: '1' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const rv = stored().drawings[0].review;
+  assert.equal(rv.stage, 'client');
+  assert.equal(rv.proposedCategory, '3');
+});
+
+await test('consultant changing our proposed category alone -> kept', async () => {
+  seed(atStage('client'));
+  const v = viewOf('u7');
+  v.drawings.find(x => x.id === 'd1').review.proposedCategory = '1';
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().drawings[0].review.proposedCategory, '3');
+});
+
+await test('before issue the consultant does not see our proposed category', async () => {
+  seed(atStage('ir2'));
+  const rv = viewOf('u7').drawings.find(x => x.id === 'd1').review;
+  assert.equal(rv.proposedCategory, null);
+  assert.ok(!rv.history.some(h => h.action === 'proposed'));
+  // and their save of that view leaves ours in place
+  const v = viewOf('u7');
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.equal(stored().drawings[0].review.proposedCategory, '3');
+  assert.ok(stored().drawings[0].review.history.some(h => h.id === 'hp'));
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });
