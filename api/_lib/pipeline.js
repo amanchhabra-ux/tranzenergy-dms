@@ -7,7 +7,7 @@
 // yet, read a drawing's CRS rows, and append rows after the existing ones. No stage changes,
 // no deletes, never a sheet replaced, never an existing comment modified.
 import crypto from 'node:crypto';
-import { workflowOn, newReviewFor, isExternal, PRE_ISSUE } from '../../src/utils/workflow.js';
+import { workflowOn, newReviewFor, reviewWithDue, isExternal, PRE_ISSUE } from '../../src/utils/workflow.js';
 import { normCode, proposeDiscipline, nextRevision } from '../../src/utils/mdl.js';
 import { buildCrsTable, crsFieldUpdates, pinRowMapFromImport } from '../../src/utils/crs.js';
 
@@ -145,18 +145,47 @@ function commitDrawing(state, drawing, { isNew = false } = {}) {
 // (appendEntry in api/_lib/log.js), never inside the document.
 const entriesFor = (drawing, activity, log) => ({ log: [log], activity: [{ drawingId: String(drawing.id), entry: { ...activity, drawingId: String(drawing.id) } }] });
 
+const MAX_DUE_SOURCE = 500;
+
+/**
+ * The due date and its source a register call may carry (cl 9.1: agreed at each referral).
+ * → null when neither is given, else { dueDate?, dueSource? }. A date that is not a real
+ * YYYY-MM-DD → 400 due_date_invalid; a source that is not text or longer than 500 → 400.
+ */
+export function cleanDue({ dueDate, dueSource } = {}) {
+  const hasDate = dueDate != null && dueDate !== '';
+  const hasSource = dueSource != null && dueSource !== '';
+  if (!hasDate && !hasSource) return null;
+  if (hasDate) {
+    const v = typeof dueDate === 'string' ? dueDate.trim() : '';
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null;
+    // 2026-02-30 parses as 2 March: only a date that reads back the same is taken
+    if (!t || isNaN(t) || t.toISOString().slice(0, 10) !== v) fail(400, 'due_date_invalid', { dueDate });
+  }
+  if (hasSource && (typeof dueSource !== 'string' || dueSource.trim().length > MAX_DUE_SOURCE)) fail(400, 'due_source_invalid', { maxChars: MAX_DUE_SOURCE });
+  return { ...(hasDate ? { dueDate: dueDate.trim() } : {}), ...(hasSource ? { dueSource: dueSource.trim() } : {}) };
+}
+
 /**
  * Register a received document (the file is already stored at fileUrl).
  *  - no record with the code: a new drawing, review started (createDrawing)
  *  - an expected MDL record: its first revision (R0 unless given), review started, expected=false
  *  - a received drawing: a new revision only when `revision` is given and new (uploadRevision)
+ * dueDate / dueSource (optional): the review that starts carries them instead of the project
+ * default (reviewWithDue, with its 'due' history entry by the pipeline user).
  * → { state, drawing, outcome: 'created' | 'filled' | 'revision', version, entries }
  */
-export function applyRegister(state, { who, project, code, title, revision, fileUrl, fileName, now = new Date().toISOString() }) {
+export function applyRegister(state, { who, project, code, title, revision, fileUrl, fileName, dueDate, dueSource, now = new Date().toISOString() }) {
   const user = who.user;
   const { ev, entry, log } = actor(user, now);
   const note = `Pipeline: ${fileName || 'file'}`;
-  const start = (d, prev) => (workflowOn(project) ? { ...d, review: newReviewFor(d, project, prev, { entry, by: user.name }) } : d);
+  const due = cleanDue({ dueDate, dueSource });
+  const withDue = (review) => {
+    if (!due) return review;
+    const source = due.dueSource ?? (due.dueDate ? '' : review.dueSource);
+    return reviewWithDue(review, { dueDate: due.dueDate ?? review.dueDate, dueSource: source }, { entry }) || review;
+  };
+  const start = (d, prev) => (workflowOn(project) ? { ...d, review: withDue(newReviewFor(d, project, prev, { entry, by: user.name })) } : d);
   const existing = findDrawing(state, project, code);
 
   if (!existing) {
@@ -218,10 +247,12 @@ export function applyAttachCrs(state, { who, project, code, crsUrl, fileName, pa
   const sheet = crsSummary(d);
   if (sheet.present) fail(409, 'sheet_present', { code: d.code, rows: sheet.rows, fileName: sheet.fileName });
   if (!parsed || parsed.fileType !== 'excel') fail(400, 'not_excel', { fileType: parsed?.fileType || null });
-  const comments = parsed.comments || [];
+  // each row read from the file: an id of its own, and who uploaded it (the pipeline user)
+  const comments = (parsed.comments || []).map(c => ({ ...c, id: c.id || uid('crs'), uploadedBy: user.id }));
   const next = {
     ...d,
     ...crsFieldUpdates(d, parsed.meta || {}),
+    crsUploadedBy: { id: user.id, name: user.name, role: user.role, at: now, fileName: fileName || null, via: VIA },
     crsData: crsUrl,
     crsImported: comments,
     crsMeta: parsed.meta || {},
@@ -266,6 +297,7 @@ export function drawingComments(state, project, code) {
   const pins = new Map((d.pins || []).map(p => [p.id, p]));
   const rows = buildCrsTable(d).map((r, order) => {
     let authorId = null;
+    let uploadedBy = null;
     let id = r.key;
     if (r.kind === 'pin') {
       const pin = pins.get(r.pinId) || {};
@@ -276,11 +308,14 @@ export function drawingComments(state, project, code) {
     } else {
       const c = (d.crsImported || [])[r.idx] || {};
       authorId = c.authorId ?? null;
+      uploadedBy = c.uploadedBy ?? null;
       if (c.id) id = c.id;
     }
     // rows without an author id (read from an Excel, older comments): by the name, when it is a user's
     const name = String(r.commentBy || '').replace(/ \(Client\)$/, '').trim().toLowerCase();
     const user = authorId != null ? byId.get(authorId) : (name ? byName.get(name) : null);
+    // who uploaded the Excel a sheet row was read from (null for pins, panel rows, older sheets)
+    const uploader = uploadedBy != null ? byId.get(uploadedBy) : null;
     return {
       id: String(id),
       source: r.kind === 'pin' ? 'pin' : 'crs',
@@ -296,6 +331,9 @@ export function drawingComments(state, project, code) {
       replyBy: r.replyBy || '',
       vis: r.internal ? 'internal' : null,
       local: r.kind === 'local',
+      uploadedBy: uploadedBy ?? null,
+      uploadedByName: uploader?.name ?? null,
+      uploadedByRole: uploader?.role ?? null,
       order,
     };
   });

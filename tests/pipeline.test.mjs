@@ -286,6 +286,54 @@ await withEnv(on, async () => {
     assert.equal(d.review.stage, 'ir1'); assert.equal(d.review.dueSource, 'project default');
     othersSame(before, after, d.id);
   });
+  await test('register with dueDate and dueSource: the review carries them, history has the due entry', async () => {
+    seed(baseState());
+    const r = await register({ code: 'RPCL100MW-ARIPL-PSS-ELE-RPT-024', dueDate: '2026-10-03', dueSource: 'Atlanta email 26.09.2026: by 03.10' });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    assert.equal(r.body.review.dueDate, '2026-10-03'); assert.equal(r.body.review.dueSource, 'Atlanta email 26.09.2026: by 03.10');
+    const d = drawingOf('RPCL100MW-ARIPL-PSS-ELE-RPT-024');
+    assert.equal(d.review.dueDate, '2026-10-03'); assert.equal(d.review.dueSource, 'Atlanta email 26.09.2026: by 03.10');
+    assert.deepEqual(d.review.history.map(h => h.action), ['registered', 'due']);
+    const h = d.review.history.at(-1);
+    assert.equal(h.by, 'u3'); assert.equal(h.byName, 'Jacopo Licheri'); assert.equal(h.via, 'pipeline');
+    assert.equal(h.oldDue, addDays(today(), 10)); assert.equal(h.newDue, '2026-10-03');
+    assert.equal(h.oldSource, 'project default'); assert.equal(h.newSource, 'Atlanta email 26.09.2026: by 03.10');
+  });
+  await test('register a new revision and a new code with a due date: both reviews carry it', async () => {
+    seed(baseState());
+    let r = await register({ code: 'RPCL100MW-ARIPL-PVP-CIV-DWG-006A', revision: 'R4', dueDate: '2026-10-07', dueSource: 'cl 9.1 referral' });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    let d = drawingOf('RPCL100MW-ARIPL-PVP-CIV-DWG-006A');
+    assert.equal(d.review.cycle, 2); assert.equal(d.review.dueDate, '2026-10-07'); assert.equal(d.review.dueSource, 'cl 9.1 referral');
+    assert.deepEqual(d.review.history.slice(-2).map(h => h.action), ['resubmitted', 'due']);
+    r = await register({ code: 'NEW-DUE-1', dueDate: '2026-10-09' });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    d = drawingOf('NEW-DUE-1');
+    assert.equal(d.review.dueDate, '2026-10-09'); assert.equal(d.review.dueSource, '', 'a date without a source is not the project default');
+  });
+  await test('register without a due date: project default, no due entry (unchanged)', async () => {
+    seed(baseState());
+    const r = await register({ code: 'RPCL100MW-ARIPL-PSS-ELE-RPT-024', dueDate: '', dueSource: null });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    const d = drawingOf('RPCL100MW-ARIPL-PSS-ELE-RPT-024');
+    assert.equal(d.review.dueDate, addDays(today(), 10)); assert.equal(d.review.dueSource, 'project default');
+    assert.deepEqual(d.review.history.map(h => h.action), ['registered']);
+    assert.equal(r.body.review.dueSource, 'project default');
+  });
+  await test('register with an invalid due date or source -> 400, nothing written or stored', async () => {
+    seed(baseState());
+    const before = raw();
+    const folder = path.join(dir, 'files', 'drawings', 'RPCL100MW-ARIPL-PSS-ELE-RPT-024');
+    const files = fs.existsSync(folder) ? fs.readdirSync(folder).length : 0;
+    for (const dueDate of ['2026-02-30', '03.10.2026', '2026-13-01', 20261003]) {
+      const r = await register({ code: 'RPCL100MW-ARIPL-PSS-ELE-RPT-024', dueDate });
+      assert.equal(r.statusCode, 400, String(dueDate)); assert.equal(r.body.error, 'due_date_invalid', String(dueDate));
+    }
+    const r = await register({ code: 'RPCL100MW-ARIPL-PSS-ELE-RPT-024', dueDate: '2026-10-03', dueSource: 'x'.repeat(501) });
+    assert.equal(r.statusCode, 400); assert.equal(r.body.error, 'due_source_invalid');
+    assert.equal(raw(), before);
+    assert.equal(fs.existsSync(folder) ? fs.readdirSync(folder).length : 0, files, 'no file stored');
+  });
   await test('not a PDF, too large, or no file -> refused, nothing written', async () => {
     seed(baseState());
     const before = raw();
@@ -333,7 +381,11 @@ await withEnv(on, async () => {
     const d = drawingOf(code);
     assert.ok(want.comments.length > 0, 'the sample has rows');
     assert.equal(r.body.rows, want.comments.length);
-    assert.deepEqual(d.crsImported, JSON.parse(JSON.stringify(want.comments)));
+    // the rows as read, each with an id of its own and the pipeline user as uploader
+    assert.deepEqual(d.crsImported.map(({ id, uploadedBy, ...c }) => c), JSON.parse(JSON.stringify(want.comments)));
+    assert.ok(d.crsImported.every(c => /^crs-/.test(c.id) && c.uploadedBy === 'u3'));
+    assert.equal(new Set(d.crsImported.map(c => c.id)).size, d.crsImported.length, 'ids unique');
+    assert.deepEqual({ ...d.crsUploadedBy, at: undefined }, { id: 'u3', name: 'Jacopo Licheri', role: 'Project Manager', at: undefined, fileName: path.basename(AEL), via: 'pipeline' });
     assert.deepEqual(d.crsLayout, JSON.parse(JSON.stringify(want.layout)));
     assert.deepEqual(d.crsMeta, JSON.parse(JSON.stringify(want.meta)));
     assert.equal(d.crsFileType, 'excel'); assert.equal(d.crsFileName, path.basename(AEL));
@@ -395,9 +447,40 @@ await withEnv(on, async () => {
     assert.deepEqual(r.body.rows.map(x => x.order), [0, 1, 2]);
     const [pin, xl, loc] = r.body.rows;
     assert.deepEqual(pin, { id: 'pin-1', source: 'pin', pin: 1, page: 3, text: 'Breaker rating missing.', author: 'TE Engineer 1', authorId: 'u4', authorRole: 'Engineer',
-      date: '2026-09-25', status: 'Open', reply: 'Agreed.', replyBy: 'Jacopo Licheri', vis: 'internal', local: false, order: 0 });
+      date: '2026-09-25', status: 'Open', reply: 'Agreed.', replyBy: 'Jacopo Licheri', vis: 'internal', local: false,
+      uploadedBy: null, uploadedByName: null, uploadedByRole: null, order: 0 });
     assert.equal(xl.source, 'crs'); assert.equal(xl.local, false); assert.equal(xl.author, 'AEL'); assert.equal(xl.authorId, null); assert.equal(xl.authorRole, null); assert.equal(xl.vis, null);
     assert.equal(loc.id, 'crs-j'); assert.equal(loc.local, true); assert.equal(loc.authorId, 'u3'); assert.equal(loc.authorRole, 'Project Manager'); assert.equal(loc.vis, 'internal');
+  });
+  await test('comments: sheet rows name who uploaded the Excel; older rows, pins and panel rows null', async () => {
+    const s = commentState();
+    const d6 = s.drawings.find(d => d.id === 'd6');
+    d6.crsImported.push({ id: 'crs-k1', row: 9, sno: '9', comment: 'Row from the Excel he uploaded', commentBy: 'Kiran', status: 'Open', uploadedBy: 'u4' });
+    d6.crsImported.push({ id: 'crs-p1', row: 10, sno: '10', comment: 'Row from our attached sheet', commentBy: 'AEL', status: 'Open', uploadedBy: 'u3' });
+    seed(s);
+    const r = await comments('RPCL100MW-ARIPL-PSS-ELE-DWG-031');
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    const by = Object.fromEntries(r.body.rows.map(x => [x.text, x]));
+    const k = by['Row from the Excel he uploaded'];
+    assert.equal(k.source, 'crs'); assert.equal(k.local, false); assert.equal(k.id, 'crs-k1');
+    assert.equal(k.uploadedBy, 'u4'); assert.equal(k.uploadedByName, 'TE Engineer 1'); assert.equal(k.uploadedByRole, 'Engineer');
+    const p = by['Row from our attached sheet'];
+    assert.equal(p.uploadedBy, 'u3'); assert.equal(p.uploadedByName, 'Jacopo Licheri'); assert.equal(p.uploadedByRole, 'Project Manager');
+    for (const t of ['Uploaded sheet row', 'Breaker rating missing.', 'Panel row by Jacopo']) {
+      assert.equal(by[t].uploadedBy, null, t); assert.equal(by[t].uploadedByName, null, t); assert.equal(by[t].uploadedByRole, null, t);
+    }
+  });
+  await test('attach-crs stamps the pipeline user; the rows on other drawings stay as they are', async () => {
+    seed(commentState());
+    const before = stored();
+    const r = await call('attach-crs', { body: { project: 'TE-002', code: 'RPCL100MW-ARIPL-PVP-CIV-DWG-006A', fileName: 'crs.xlsx', contentBase64: xlsxB64() } });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    othersSame(before, stored(), 'd3');
+    const d = drawingOf('RPCL100MW-ARIPL-PVP-CIV-DWG-006A');
+    assert.deepEqual(d.crsImported.map(c => c.uploadedBy), ['u3', 'u3']);
+    assert.equal(d.crsUploadedBy.id, 'u3'); assert.equal(d.crsUploadedBy.fileName, 'crs.xlsx');
+    const rows = (await comments('RPCL100MW-ARIPL-PVP-CIV-DWG-006A')).body.rows;
+    assert.deepEqual(rows.map(x => [x.source, x.local, x.uploadedByName]), [['crs', false, 'Jacopo Licheri'], ['crs', false, 'Jacopo Licheri']]);
   });
   await test('comments on an unknown drawing -> 404, without a code -> 400', async () => {
     seed(commentState());

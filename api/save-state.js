@@ -5,7 +5,7 @@ import { requireUser } from './_lib/auth.js';
 import { forgetMembers, readState, localEtag, STATE_KEY } from './_lib/state.js';
 import { isExternal, mergeExternal, allowedProjectIds } from './_lib/view.js';
 import { keepLegacy, extractFromSave, writeExtracted } from './_lib/log.js';
-import { checkSave } from './_lib/authz.js';
+import { checkSave, stampCrsUploads } from './_lib/authz.js';
 import { reviewEvents, sendReviewEmails } from './_lib/notify.js';
 
 // Body: { state, etag } — etag is the version the client last loaded
@@ -53,7 +53,8 @@ export default async function handler(req, res) {
       // internal roles: users, org and review workflow change only when an admin saves
       const refused = checkSave(before, state, who);
       if (refused) return res.status(refused.status).json({ error: refused.error });
-      next = state;
+      // who uploaded a CRS Excel is the saving user, never what the browser claims
+      next = stampCrsUploads(before, state, who.user);
     }
     // the document keeps only the entries it already held (none once migrated)
     next = keepLegacy(before, next);

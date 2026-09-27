@@ -30,6 +30,8 @@ function drawingForExternal(d) {
     crsImported: (d.crsImported || []).filter(c => !hidden(c)),
     crsData: null, crsFileName: null, crsLayout: null, crsRowMap: {}, crsClearRows: [],
   };
+  // who uploaded the working Excel, and its file name, belong with the working Excel
+  delete out.crsUploadedBy;
   // the pipeline's retry keys name the ids of rows it added, internal ones included
   delete out.pipelineAppends;
   // before issue, rows read from the working Excel are TranzEnergy's own, and so is the
@@ -118,6 +120,8 @@ function ownedBy(user) {
   return (x) => {
     const o = { ...x, authorId: user.id };
     delete o.vis;
+    // who uploaded an internal CRS Excel is set by the server for internal users only
+    delete o.uploadedBy;
     if ('author' in o) o.author = user.name;
     if ('commentBy' in o) o.commentBy = user.name;
     return o;
