@@ -4,6 +4,7 @@ import { putText, PreconditionFailed, strongEtag } from './_lib/r2.js';
 import { requireUser } from './_lib/auth.js';
 import { forgetMembers, readState, localEtag, STATE_KEY } from './_lib/state.js';
 import { isExternal, mergeExternal } from './_lib/view.js';
+import { checkSave } from './_lib/authz.js';
 import { reviewEvents, sendReviewEmails } from './_lib/notify.js';
 
 // Body: { state, etag } — etag is the version the client last loaded
@@ -35,7 +36,7 @@ export default async function handler(req, res) {
     const cur = await readState();
     const before = cur.text ? JSON.parse(cur.text) : null;
     let next = state;
-    if (local && etag && cur.etag && strongEtag(etag) !== cur.etag) {
+    if (etag && cur.etag && strongEtag(etag) !== cur.etag) {
       return res.status(409).json({ error: 'conflict', message: 'The workspace was changed by someone else.' });
     }
     if (isExternal(who.user)) {
@@ -44,6 +45,10 @@ export default async function handler(req, res) {
         return res.status(409).json({ error: 'conflict', message: 'The workspace was changed by someone else.' });
       }
       next = mergeExternal(before, state, who.user);
+    } else {
+      // internal roles: users, org and review workflow change only when an admin saves
+      const refused = checkSave(before, state, who);
+      if (refused) return res.status(refused.status).json({ error: refused.error });
     }
 
     let newEtag = null;
