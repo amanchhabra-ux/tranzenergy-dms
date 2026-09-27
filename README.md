@@ -26,3 +26,23 @@ If you are developing a production application, we recommend using TypeScript wi
 Once any admin has a password, neither bootstrap route applies: sign-in is by password only, and admins set everyone else's password in the Admin panel. There is no built-in password.
 
 Local development (`npm run dev`) keeps its data in `.local-data`. On an empty `.local-data`, start it with `ADMIN_EMAILS=aman@tranzenergy.in npm run dev` (or with `ADMIN_BOOTSTRAP_TOKEN`) to set the first password.
+
+## Pipeline API (review pipeline)
+
+A small token-authenticated API for TranzEnergy's review pipeline, in `api/pipeline/[action].js` (one function; the rules are in `api/_lib/pipeline.js`):
+
+| Route | What it does |
+|---|---|
+| `GET /api/pipeline/drawings?project=<id, code or name>` | The project's drawings: code, title, expected, current revision, revisions, review stage / due date / proposed category, CRS present and its row count |
+| `POST /api/pipeline/register` `{ project, code, title?, revision?, fileName, contentBase64 \| key }` | A received PDF: creates the drawing, or fills an expected MDL record as its first revision (R0 unless given), or adds a new revision (a received drawing needs `revision`; one already held is refused with 409 `revision_exists`). The review starts as in the app |
+| `POST /api/pipeline/attach-crs` `{ project, code, fileName, contentBase64 \| key }` | A CRS Excel on a drawing that has no sheet yet, parsed as the app does. A drawing with a sheet is refused with 409 `sheet_present` and its row count: a sheet is never replaced |
+| `POST /api/pipeline/upload-url` `{ project, code, fileName, kind: 'pdf' \| 'crs' }` | For files over 3 MB: a presigned PUT to R2; then call register / attach-crs with the returned `key` |
+
+It cannot change a review stage, comment, delete or replace anything. Every change is made as one workspace user and goes through the same `checkSave` rules as a browser save.
+
+| Variable | Needed | What it does |
+|---|---|---|
+| `PIPELINE_TOKEN` | To enable it | The bearer token (`Authorization: Bearer …`), at least 32 characters; use a long random value. When unset the routes answer 404. |
+| `PIPELINE_USER_EMAIL` | With the token | The workspace user the pipeline acts as. Must exist, must not be a Consultant, needs an uploading role (Admin, Project Manager, Senior Engineer, Engineer) and must be assigned to the project. |
+
+Request bodies on Vercel are limited to 4.5 MB, so inline files (`contentBase64`) stop at 3 MB; larger files go through `upload-url`. Tests: `node tests/pipeline.test.mjs`.

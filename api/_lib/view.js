@@ -79,7 +79,7 @@ export function filesInView(view) {
 }
 
 /** Every stored-file link anywhere in the workspace. */
-function filesInWorkspace(state) {
+export function filesInWorkspace(state) {
   const s = filesInView({ drawings: state.drawings, projects: state.projects });
   for (const p of state.proposals || []) if (p?.fileData) s.add(p.fileData);
   return s;

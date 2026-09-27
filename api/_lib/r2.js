@@ -50,6 +50,14 @@ export async function putObject(key, body, contentType) {
   if (!res.ok) throw new Error(`R2 upload failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
 }
 
+/** The object's bytes (or its first bytes with range: 'bytes=0-7'); null when it does not exist. */
+export async function readObject(key, { range } = {}) {
+  const res = await r2().fetch(objectUrl(key), { method: 'GET', headers: range ? { Range: range } : {} });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`R2 read failed (${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export async function deleteObject(key) {
   const res = await r2().fetch(objectUrl(key), { method: 'DELETE' });
   if (!res.ok && res.status !== 404) throw new Error(`R2 delete failed (${res.status})`);
