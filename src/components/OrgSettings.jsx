@@ -1,14 +1,17 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { Building2, Upload, Trash2, Check } from 'lucide-react';
-import { DEFAULT_ORG, LOGO_MAX_BYTES } from '../utils/org';
+import { DEFAULT_ORG, LOGO_MAX_BYTES, isEmail } from '../utils/org';
 
 const FIELDS = [
   { key: 'name', label: 'Organisation name', hint: 'Shown on the sign-in page, the menu, the browser tab and emails.' },
   { key: 'shortName', label: 'Short name', hint: 'Phone header and file names (e.g. the backup file).' },
   { key: 'emailFromName', label: 'Email sender name', hint: 'Display name on notification emails. Empty: the NOTIFY_FROM name, else the organisation name.' },
   { key: 'appUrl', label: 'App link in emails', hint: 'e.g. https://dms.company.com. APP_URL in Vercel takes precedence.' },
+  { key: 'replyToTeam', label: 'Reply-To for team emails', hint: 'Where replies from internal users go (e.g. the first reviewer sending his comment sheet). Empty: no Reply-To.' },
+  { key: 'replyToConsultant', label: 'Reply-To for consultant emails', hint: 'Where replies from users with role Consultant go. Empty: no Reply-To.' },
 ];
+const EMAIL_FIELDS = ['replyToTeam', 'replyToConsultant'];
 const COLORS = [
   { key: 'primaryColor', label: 'Primary colour', hint: 'Buttons, active menu items, highlights.' },
   { key: 'accentColor', label: 'Accent colour', hint: 'Drawing numbers and secondary highlights.' },
@@ -35,6 +38,8 @@ export function OrgSettings() {
   const save = () => {
     const bad = COLORS.find(c => form[c.key] && !/^#[0-9a-f]{6}$/i.test(form[c.key]));
     if (bad) { setMsg(`⚠️ ${bad.label} must look like #3b5b7e, or be empty.`); return; }
+    const badMail = FIELDS.find(f => EMAIL_FIELDS.includes(f.key) && String(form[f.key] || '').trim() && !isEmail(String(form[f.key]).trim()));
+    if (badMail) { setMsg(`⚠️ ${badMail.label} must be one email address, e.g. name@company.com, or be empty.`); return; }
     updateOrg(Object.fromEntries(Object.keys(DEFAULT_ORG).map(k => [k, String(form[k] || '').trim()])));
     setMsg('✓ Saved. Everyone sees the new settings within a few seconds.');
   };
