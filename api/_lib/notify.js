@@ -4,8 +4,14 @@
 //   NOTIFY_FROM      — e.g. "Company DMS <dms@company.com>" (a verified sender)
 //   APP_URL          — e.g. https://company-dms.vercel.app (else the App link in Admin → Organisation)
 // The sender's display name can also be set in Admin → Organisation.
-import { STAGE, stageActors } from '../../src/utils/workflow.js';
-import { orgOf } from '../../src/utils/org.js';
+// The sender address cannot receive mail, so replies go to the Reply-To set in
+// Admin → Organisation: replyToTeam for internal users, replyToConsultant for users with
+// role Consultant. A save that notifies both sends two emails, one per group. Resend's
+// REST field is `reply_to` (string or array), see resend.com/docs/api-reference/emails/send-email.
+import { STAGE, stageActors, isExternal } from '../../src/utils/workflow.js';
+import { orgOf, isEmail } from '../../src/utils/org.js';
+
+export const IR1_REPLY_LINE = 'Reply to this email with your comment sheet attached if you work in Excel.';
 
 /** "Name <address>" for the From line: the org's email name, else NOTIFY_FROM's, else the org name. */
 export function fromLine(org, notifyFrom = '') {
@@ -46,21 +52,33 @@ export async function sendReviewEmails(state, events) {
   const app = process.env.APP_URL || org.appUrl || '';
   const from = fromLine(org, process.env.NOTIFY_FROM || '');
   const jobs = [];
+  const replyTeam = isEmail(org.replyToTeam) ? org.replyToTeam : '';
+  const replyConsultant = isEmail(org.replyToConsultant) ? org.replyToConsultant : '';
   for (const ev of events) {
     const { project, ids } = recipients(state, ev);
-    const to = ids.map(id => users.get(id)?.email).filter(Boolean);
-    if (!to.length) continue;
+    const people = ids.map(id => users.get(id)).filter(u => u?.email);
+    if (!people.length) continue;
     const d = ev.drawing;
     const stage = STAGE[ev.to]?.label || ev.to;
     const subject = `[${project?.code || 'DMS'}] ${d.code} ${d.currentVersion} — ${stage}`;
     const due = d.review?.dueDate && !['closed', 'resubmit'].includes(ev.to) ? `Due ${d.review.dueDate}. ` : '';
     const text = `${d.code} ${d.currentVersion} — ${d.title}\nNow: ${stage}. ${due}\n${app ? `\nOpen the DMS: ${app}\n` : ''}\n${org.name}\n`;
-    if (!key) { console.log('[notify] (email off) →', to.join(', '), '|', subject); continue; }
-    jobs.push(fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject, text }),
-    }).then(r => { if (!r.ok) console.error('[notify] email failed', r.status); }).catch(e => console.error('[notify]', e.message)));
+    const groups = [
+      { to: people.filter(u => !isExternal(u)).map(u => u.email), replyTo: replyTeam,
+        text: replyTeam && ev.to === 'ir1' ? `${text}\n${IR1_REPLY_LINE}\n` : text },
+      { to: people.filter(isExternal).map(u => u.email), replyTo: replyConsultant, text },
+    ];
+    for (const g of groups) {
+      if (!g.to.length) continue;
+      if (!key) { console.log('[notify] (email off) →', g.to.join(', '), '|', subject); continue; }
+      const body = { from, to: g.to, subject, text: g.text };
+      if (g.replyTo) body.reply_to = g.replyTo;
+      jobs.push(fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => { if (!r.ok) console.error('[notify] email failed', r.status); }).catch(e => console.error('[notify]', e.message)));
+    }
   }
   // don't hold the save up for long
   await Promise.race([Promise.all(jobs), new Promise(r => setTimeout(r, 4000))]);

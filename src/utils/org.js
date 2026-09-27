@@ -12,7 +12,12 @@ export const DEFAULT_ORG = {
   accentColor: '',
   emailFromName: '',  // display name on notification emails
   appUrl: '',         // link in notification emails (APP_URL in Vercel wins)
+  replyToTeam: '',       // Reply-To on notification emails to internal users; empty = none
+  replyToConsultant: '', // Reply-To on notification emails to users with role Consultant; empty = none
 };
+
+/** A plain email address (no display name, no list). */
+export const isEmail = (v) => typeof v === 'string' && /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(v);
 
 export const LOGO_MAX_BYTES = 200 * 1024;
 
