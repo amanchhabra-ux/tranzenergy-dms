@@ -35,6 +35,20 @@ Local development (`npm run dev`) keeps its data in `.local-data`. On an empty `
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Yes | R2 API token with read and write on the bucket. |
 | `R2_BUCKET` | Yes | The bucket: drawings, CRS files, the workspace document `_system/db_state_v5.json` and the password store. Keep a copy of `_system/db_state_v5.json` before a deploy that changes how it is saved. |
 
+### Activity log
+
+The workspace log and each drawing's activity trail are not in `_system/db_state_v5.json`. Each entry is one immutable object, written create-only (`api/_lib/log.js`):
+
+| Key | Holds |
+|---|---|
+| `_system/log/<revTs>-<id>.json` | workspace log entry |
+| `_system/log-by/<userId>/<revTs>-<id>.json` | the same entry, indexed by author (what a consultant reads) |
+| `_system/activity/<drawingId>/<revTs>-<id>.json` | drawing activity entry |
+| `_system/activity-feed/<revTs>+<drawingId>+<id>.json` | the same entry, for recent activity across drawings |
+| `_system/log-ids/<id>.json`, `_system/activity-ids/<drawingId>/<id>.json` | the id claim, written first |
+
+`revTs` is `9999999999999 - epoch ms`, 13 digits, so a listing returns the newest first. The routes are `GET/POST /api/log`, `GET/POST /api/activity` and `POST /api/admin/migrate-log` (admin, `?dryRun=1`), which `vercel.json` rewrites to the get-state function (`api/_lib/logApi.js`). The migration moves the entries still inside the document to objects and strips them from it; it runs only when an admin calls it. `node tests/migrate-log.dryrun.mjs "<backup.json>"` shows its counts on a backup without touching R2.
+
 ## Email notifications (Resend)
 
 Review-stage changes are emailed to the people of that stage once these are set (`api/_lib/notify.js`).
