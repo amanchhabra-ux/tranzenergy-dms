@@ -289,6 +289,248 @@ await test('consultant linking another record\'s file -> link dropped, file not 
   for (const f of [PDF('crs/X-009/1_crs.xlsx'), PDF('proposals/offer.pdf'), PDF('drawings/X-009/1_secret.pdf')]) assert.ok(!files.has(f), f);
 });
 
+// ── Finding 3: a drawing a consultant registers is built field by field ────────
+const recent = (iso) => Math.abs(Date.parse(iso) - Date.now()) < 60_000;
+
+await test('consultant new drawing with an internal comment, forged author and a review -> sanitised', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  v.drawings.push({
+    id: 'dNew', code: 'e-002', title: 'Layout', projectId: 'p1', currentVersion: 'R0', status: 'AFC', expectedBy: 'x',
+    pdfData: PDF('drawings/E-002/1727000000000123456_layout.pdf'),
+    versions: [{ version: 'R0', pdfData: PDF('drawings/E-002/1727000000000123456_layout.pdf'), author: 'Aman Chhabra', extra: 1 }],
+    pins: [{ id: 'pX', x: 1, y: 1, label: 1, vis: 'internal', authorId: 'u1',
+      comments: [{ id: 'cX', author: 'Aman Chhabra', authorId: 'u1', text: 'Approved, no comments', vis: 'internal' }] }],
+    crsImported: [{ id: 'crsX', local: true, comment: 'fine', commentBy: 'Aman Chhabra', authorId: 'u1', vis: 'internal' }],
+    review: { cycle: 7, stage: 'closed', category: '1', history: [{ id: 'forged', action: 'category', by: 'u1' }], note: { text: 'First issue' } },
+  });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const d = stored().drawings.find(x => x.id === 'dNew');
+  assert.equal(d.code, 'E-002');
+  assert.equal(d.status, undefined);
+  assert.equal(d.expectedBy, undefined);
+  assert.equal(d.versions[0].author, 'Atlanta Engineer');
+  assert.equal(d.versions[0].extra, undefined);
+  const pin = d.pins[0], c = pin.comments[0], item = d.crsImported[0];
+  for (const x of [pin, c, item]) { assert.equal(x.vis, undefined); assert.equal(x.authorId, 'u7'); }
+  assert.equal(c.author, 'Atlanta Engineer');
+  assert.equal(item.commentBy, 'Atlanta Engineer');
+  assert.deepEqual([d.review.stage, d.review.cycle, d.review.category], ['ir1', 1, null]);
+  assert.equal(d.review.history.length, 1);
+  assert.equal(d.review.history[0].by, 'u7');
+  assert.equal(d.review.note.text, 'First issue');
+});
+
+// ── Finding 4: server time on log and activity entries; the cap is 5000 ─────────
+await test('250 future-dated log entries from a consultant -> real entries kept, times server-stamped', async () => {
+  seed(baseState());
+  const v = viewOf('u7');
+  for (let i = 0; i < 250; i++) v.activityLog.push({ id: `spam${i}`, message: 'x', author: 'Atlanta Engineer', authorId: 'u7', time: '2099-01-01T00:00:00.000Z' });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const log = stored().activityLog;
+  assert.ok(log.some(l => l.id === 'l1') && log.some(l => l.id === 'l2'), 'real entries evicted');
+  const spam = log.filter(l => l.id.startsWith('spam'));
+  assert.equal(spam.length, 100);
+  assert.ok(spam.every(l => recent(l.time)), 'client time kept');
+});
+
+await test('internal save: new log entry gets server time, stored entries keep theirs', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.activityLog[0].time = '2099-01-01T00:00:00.000Z';
+  s.activityLog.unshift({ id: 'l3', message: 'new', author: 'Viewer', authorId: 'u5', time: '2099-01-01T00:00:00.000Z' });
+  assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 200);
+  const log = stored().activityLog;
+  assert.ok(recent(log.find(l => l.id === 'l3').time));
+  assert.equal(log.find(l => l.id === 'l1').time, '2026-09-20T10:00:00.000Z');
+});
+
+await test('drawing activity: consultant entries server-stamped, future dates cannot evict', async () => {
+  const s = baseState();
+  s.drawings[0].activity = [{ id: 'a1', type: 'upload', at: '2026-09-20T10:00:00.000Z', by: 'u2', byName: 'Project Manager' }];
+  seed(s);
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  for (let i = 0; i < 250; i++) d.activity.push({ id: `act${i}`, type: 'download', at: '2099-01-01T00:00:00.000Z', by: 'u7', byName: 'Aman Chhabra' });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const act = stored().drawings.find(x => x.id === 'd1').activity;
+  assert.ok(act.some(e => e.id === 'a1'));
+  const mine = act.filter(e => e.id.startsWith('act'));
+  assert.equal(mine.length, 100);
+  assert.ok(mine.every(e => recent(e.at) && e.byName === 'Atlanta Engineer'));
+});
+
+await test('internal save: new drawing activity entry gets server time', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.drawings[0].activity = [{ id: 'a2', type: 'download', at: '2099-01-01T00:00:00.000Z', by: 'u5', byName: 'Viewer' }];
+  assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 200);
+  assert.ok(recent(stored().drawings[0].activity[0].at));
+});
+
+// ── Finding 6: a consultant's comment is deleted only on an explicit marker ─────
+const withOwnComment = () => {
+  const s = baseState();
+  s.drawings[0].pins.push({ id: 'pin2', x: 2, y: 2, label: 2, authorId: 'u7',
+    comments: [{ id: 'c7', author: 'Atlanta Engineer', authorId: 'u7', text: 'ours' }, { id: 'c8', author: 'Project Manager', authorId: 'u2', text: 'TE reply' }] });
+  return s;
+};
+
+await test('consultant second tab missing own comment -> comment kept', async () => {
+  seed(withOwnComment());
+  const v = viewOf('u7');
+  const pin = v.drawings[0].pins.find(p => p.id === 'pin2');
+  pin.comments = pin.comments.filter(c => c.id !== 'c7');
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  assert.ok(stored().drawings[0].pins.find(p => p.id === 'pin2').comments.some(c => c.id === 'c7'));
+});
+
+await test('explicit delete marker -> own comment removed, someone else\'s kept', async () => {
+  seed(withOwnComment());
+  const v = viewOf('u7');
+  const pin = v.drawings[0].pins.find(p => p.id === 'pin2');
+  pin.comments = [];
+  v.drawings[0].deletedIds = ['c7', 'c8'];
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const d = stored().drawings[0];
+  assert.deepEqual(d.pins.find(p => p.id === 'pin2').comments.map(c => c.id), ['c8']);
+  assert.equal(d.deletedIds, undefined);
+});
+
+await test('consultant editing TE\'s reply inside their own pin -> reply unchanged', async () => {
+  seed(withOwnComment());
+  const v = viewOf('u7');
+  const pin = v.drawings[0].pins.find(p => p.id === 'pin2');
+  pin.comments.find(c => c.id === 'c8').text = 'Approved by TE';
+  pin.label = 9;
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const sp = stored().drawings[0].pins.find(p => p.id === 'pin2');
+  assert.equal(sp.comments.find(c => c.id === 'c8').text, 'TE reply');
+  assert.equal(sp.label, 9);
+});
+
+// ── Finding 7: log entries attributed by user id ─────────────────────────────
+await test('log entries matched by authorId, by name only for old entries', async () => {
+  const s = baseState();
+  s.activityLog.push(
+    { id: 'm1', message: 'mine, renamed', author: 'Old Name', authorId: 'u7', time: '2026-09-22T10:00:00.000Z' },
+    { id: 'm2', message: 'same name, other user', author: 'Atlanta Engineer', authorId: 'u2', time: '2026-09-22T11:00:00.000Z' },
+    { id: 'm3', message: 'old entry', author: 'Atlanta Engineer', time: '2026-09-22T12:00:00.000Z' },
+  );
+  seed(s);
+  const v = viewOf('u7');
+  assert.deepEqual(v.activityLog.map(l => l.id).sort(), ['m1', 'm3']);
+  v.activityLog.push({ id: 'm4', message: 'as someone else', author: 'Atlanta Engineer', authorId: 'u1', time: '2026-09-26T00:00:00.000Z' });
+  v.activityLog.push({ id: 'm5', message: 'mine', author: 'Aman Chhabra', authorId: 'u7', time: '2026-09-26T00:00:00.000Z' });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const log = stored().activityLog;
+  assert.ok(!log.some(l => l.id === 'm4'));
+  assert.equal(log.find(l => l.id === 'm5').author, 'Atlanta Engineer');
+});
+
+// ── Avatar colours rewritten by the browser are not a users change ────────────
+await test('Viewer save where only avatar colours differ -> 200', async () => {
+  const s = baseState();
+  s.users[2].color = '#94a3b8'; // old palette; the browser rewrites it to #a1a1aa on load
+  seed(s);
+  assert.equal((await post(EMAIL.u5, { state: baseState(), etag: null })).statusCode, 200);
+});
+
+// ── Finding 5 (decided): the consultant never receives the working CRS workbook ──
+const crs = await import('../src/utils/crs.js');
+const crsTexts = async (bytes) => crs.parseCrsRows(await crs.loadWorkbookRows(bytes)).comments.map(c => c.comment);
+
+await test('consultant view has no working CRS (crsData) at any stage', async () => {
+  for (const stage of ['ir1', 'consultant', 'client', 'resubmit', 'closed']) {
+    const s = baseState();
+    Object.assign(s.drawings[0], { crsData: PDF('crs/E-001/1_work.xlsx'), crsFileName: 'work.xlsx', crsLayout: { headerIdx: 1 }, crsRowMap: { 'pin:pin1': 13 } });
+    s.drawings[0].review = { ...s.drawings[0].review, stage, issued: { url: PDF('crs/E-001/1_issued.xlsx'), fileName: 'E-001_R0_CRS.xlsx' } };
+    seed(s);
+    const d = viewOf('u7').drawings.find(x => x.id === 'd1');
+    assert.equal(d.crsData, null, stage);
+    assert.equal(d.crsLayout, null, stage);
+    assert.deepEqual(d.crsRowMap, {}, stage);
+    const { filesInView } = await import('../api/_lib/view.js');
+    const files = filesInView(externalView(stored(), USERS.find(u => u.id === 'u7')));
+    assert.ok(!files.has(PDF('crs/E-001/1_work.xlsx')), stage);
+    assert.ok(files.has(PDF('crs/E-001/1_issued.xlsx')), stage);
+  }
+});
+
+// a drawing whose CRS was issued with one published comment, then more comments arrived
+async function issuedDrawing() {
+  const s = baseState();
+  const d = s.drawings[0];
+  d.pins = [{ id: 'pinTE', x: 1, y: 1, page: 1, label: 1, authorId: 'u2',
+    comments: [{ id: 'cTE', author: 'Project Manager', authorId: 'u2', text: 'Issued TE comment on the CT ratio', date: '2026-09-20 10:00' }] }];
+  const built = await crs.buildIssuedCrs(d, s.projects[0]);
+  const url = `data:application/octet-stream;base64,${Buffer.from(built.bytes).toString('base64')}`;
+  d.review = { ...d.review, stage: 'consultant', issued: { url, fileName: built.fileName, layout: built.layout, rowMap: built.rowMap } };
+  return { s, issuedBytes: built.bytes };
+}
+
+await test('consultant download = issued file as is when they have added nothing', async () => {
+  const { s, issuedBytes } = await issuedDrawing();
+  seed(s);
+  const out = await crs.consultantCrs(viewOf('u7').drawings.find(x => x.id === 'd1'), 'u7');
+  assert.deepEqual(Buffer.from(out.bytes), Buffer.from(issuedBytes));
+});
+
+await test('consultant download = issued rows + own rows, no internal rows, not the working file', async () => {
+  const { s } = await issuedDrawing();
+  const d = s.drawings[0];
+  d.crsData = PDF('crs/E-001/1_work.xlsx'); // never read: loading it would fail in this test
+  d.pins.push(
+    { id: 'pinIn', x: 2, y: 2, page: 1, label: 2, authorId: 'u2', vis: 'internal', comments: [{ id: 'cIn', author: 'Project Manager', authorId: 'u2', text: 'Internal note do not send', vis: 'internal' }] },
+    { id: 'pinAt', x: 3, y: 3, page: 1, label: 3, authorId: 'u7', comments: [{ id: 'cAt', author: 'Atlanta Engineer', authorId: 'u7', text: 'Atlanta pin comment' }] },
+  );
+  d.crsImported = [
+    { id: 'lAt', local: true, comment: 'Atlanta row comment', commentBy: 'Atlanta Engineer', authorId: 'u7', status: 'Open' },
+    { id: 'lTE', local: true, comment: 'TE internal row', commentBy: 'Project Manager', authorId: 'u2', vis: 'internal', status: 'Open' },
+  ];
+  seed(s);
+  const out = await crs.consultantCrs(viewOf('u7').drawings.find(x => x.id === 'd1'), 'u7');
+  const texts = (await crsTexts(out.bytes)).join(' | ');
+  assert.ok(texts.includes('Issued TE comment on the CT ratio'), texts);
+  assert.ok(texts.includes('Atlanta pin comment'), texts);
+  assert.ok(texts.includes('Atlanta row comment'), texts);
+  assert.ok(!texts.includes('Internal note') && !texts.includes('TE internal row'), texts);
+  // and from the full (unfiltered) drawing, rows that are not theirs still do not go in
+  const full = await crs.consultantCrs(stored().drawings.find(x => x.id === 'd1'), 'u7');
+  assert.ok(!(await crsTexts(full.bytes)).join(' | ').includes('Internal note'));
+});
+
+await test('consultant bulk import adds N own rows and cannot edit or delete ours', async () => {
+  const s = baseState();
+  s.drawings[0].review.stage = 'consultant';
+  s.drawings[0].crsImported = [{ id: 'lTE', local: true, comment: 'TE row', commentBy: 'Project Manager', authorId: 'u2', status: 'Open' }];
+  seed(s);
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  d.crsImported[0].comment = 'rewritten by consultant';
+  d.crsImported[0].status = 'Closed';
+  d.crsImported.push(...[1, 2, 3].map(i => ({ id: `imp${i}`, local: true, comment: `Imported ${i}`, commentBy: 'Project Manager', status: 'Open' })));
+  d.deletedIds = ['lTE'];
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const items = stored().drawings[0].crsImported;
+  assert.deepEqual(items.find(c => c.id === 'lTE'), s.drawings[0].crsImported[0]);
+  const mine = items.filter(c => c.id.startsWith('imp'));
+  assert.equal(mine.length, 3);
+  assert.ok(mine.every(c => c.authorId === 'u7' && c.commentBy === 'Atlanta Engineer' && !c.vis));
+});
+
+await test('a consultant comment marks the working Excel for rewrite by an internal tab', async () => {
+  const s = baseState();
+  Object.assign(s.drawings[0], { crsData: PDF('crs/E-001/1_work.xlsx'), crsRev: 4, crsSyncedRev: 4 });
+  seed(s);
+  const v = viewOf('u7');
+  v.drawings[0].crsImported.push({ id: 'new1', local: true, comment: 'one more', status: 'Open' });
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const d = stored().drawings[0];
+  assert.equal(d.crsData, PDF('crs/E-001/1_work.xlsx'));
+  assert.ok(d.crsRev > d.crsSyncedRev);
+});
+
 const failed = results.filter(r => !r[0]).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 fs.rmSync(dir, { recursive: true, force: true });

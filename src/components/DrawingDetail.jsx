@@ -9,7 +9,7 @@ import { CrsPicker } from './CrsPicker';
 import { CrsPanel } from './CrsPanel';
 import { ResizeHandle } from './ResizeHandle';
 import { useIsMobile } from '../utils/useIsMobile';
-import { readCrs, downloadCrs } from '../utils/crs';
+import { readCrs, downloadCrs, consultantCrs, saveBytes } from '../utils/crs';
 import { ReviewBar } from './ReviewBar';
 import { ActivityPanel } from './ActivityPanel';
 import { markSeen, seenAt } from '../utils/activity';
@@ -85,13 +85,25 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
   const fileInputRef = useRef(null);
   const crsInputRef = useRef(null);
 
+  // An Excel CRS: for us it becomes the drawing's CRS file; an outside consultant's
+  // becomes comments of theirs added to the CRS (the file itself is not stored)
+  const attachCrs = async (file) => {
+    if (external) {
+      const parsed = await readCrs(file);
+      if (!(parsed.comments || []).length) throw new Error('No comments found in this sheet (it needs a Comment column).');
+      uploadCRS(drawing.id, null, parsed, file.name);
+      return;
+    }
+    const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, file), readCrs(file)]);
+    uploadCRS(drawing.id, url, parsed, file.name);
+  };
+
   const handleCrsUpload = async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
     try {
-      const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, file), readCrs(file)]);
-      uploadCRS(drawing.id, url, parsed, file.name);
+      await attachCrs(file);
       setActiveView('split');
     } catch (err) {
       console.error(err);
@@ -164,7 +176,13 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
     recordDownload(drawing.id, 'pdf', a.download);
     if (drawing.crsData || drawing.pins?.length || drawing.crsImported?.length) recordDownload(drawing.id, 'crs', drawing.crsFileName || `${drawing.code}_CRS.xlsx`);
 
-    if (!drawing.crsData && (drawing.pins?.length || drawing.crsImported?.length)) {
+    // an outside consultant: the issued CRS with their own comments added (never the working file)
+    if (external && (drawing.review?.issued?.url || drawing.review?.cycles?.length)) {
+      setTimeout(async () => {
+        try { const c = await consultantCrs(drawing, currentUser?.id); if (c) saveBytes(c.bytes, c.fileName); }
+        catch (err) { alert('⚠️ Could not build the CRS: ' + err.message); }
+      }, 300);
+    } else if (!drawing.crsData && (drawing.pins?.length || drawing.crsImported?.length)) {
       setTimeout(() => downloadCrs(drawing, projects.find(p => p.id === drawing.projectId)), 300);
     } else if (drawing.crsData) {
       setTimeout(() => {
@@ -558,7 +576,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
           onClose={() => setShowUploadModal(false)}
           onUploaded={() => setShowUploadModal(false)}
           uploadRevision={uploadRevision}
-          uploadCRS={uploadCRS}
+          attachCrs={attachCrs}
           currentVersion={drawing.currentVersion}
         />
       )}
@@ -567,7 +585,7 @@ export function DrawingDetail({ drawingId, showSidebar, onToggleSidebar, onMoved
 }
 
 // ─── Upload Revision Modal ──────────────────────────────────────────────────
-function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, uploadCRS, currentVersion }) {
+function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, attachCrs, currentVersion }) {
   const [pdfFile, setPdfFile] = useState(null);
   const [crsFile, setCrsFile] = useState(null);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
@@ -679,8 +697,7 @@ function UploadRevisionModal({ drawing, onClose, onUploaded, uploadRevision, upl
       uploadRevision(drawing.id, summary, blob.url);
       if (crsFile) {
         try {
-          const [url, parsed] = await Promise.all([uploadCrsFile(drawing.code, crsFile), readCrs(crsFile)]);
-          uploadCRS(drawing.id, url, parsed, crsFile.name);
+          await attachCrs(crsFile);
         }
         catch (err) { alert('⚠️ Revision saved, but the CRS upload failed: ' + err.message); }
       }

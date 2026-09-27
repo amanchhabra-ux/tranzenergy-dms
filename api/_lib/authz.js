@@ -45,7 +45,10 @@ export function checkSave(before, next, who) {
   }
 
   if (who?.isAdmin) return null;
-  if (!same(before.users || [], next.users || [])) return adminOnly;
+  // avatar colours are cosmetic, and every browser rewrites old palette colours on load
+  // (recolorUsers in src/AppContext.jsx): a colour-only difference is not a change
+  const noColour = (list) => (list || []).map(u => (u && typeof u === 'object' ? { ...u, color: undefined } : u));
+  if (!same(noColour(before.users), noColour(next.users))) return adminOnly;
   if ('org' in next && !same(before.org ?? {}, next.org ?? {})) return adminOnly;
   const wb = workflows(before), wn = workflows(next);
   for (const id of new Set([...Object.keys(wb), ...Object.keys(wn)])) {
