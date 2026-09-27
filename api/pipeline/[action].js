@@ -3,7 +3,7 @@
 //   GET  /api/pipeline/comments?project=…&code=<drawing code>   → the drawing's CRS rows in table order
 //   POST /api/pipeline/append-rows { project, code, rows: [{ text, page?, section?, topic?, status? }], clientKey? }
 //   POST /api/pipeline/upload-url  { project, code, fileName, kind: 'pdf' | 'crs' }  → presigned PUT (files over 3 MB)
-//   POST /api/pipeline/register    { project, code, title?, revision?, fileName, contentBase64 | key }
+//   POST /api/pipeline/register    { project, code, title?, revision?, dueDate?, dueSource?, fileName, contentBase64 | key }
 //   POST /api/pipeline/attach-crs  { project, code, fileName, contentBase64 | key }
 // Header: Authorization: Bearer <PIPELINE_TOKEN>. Without PIPELINE_TOKEN the routes answer 404.
 // Every change is made as the workspace user PIPELINE_USER_EMAIL and checked with checkSave.
@@ -193,6 +193,7 @@ async function handle(req, res, action) {
   if (action === 'register') {
     const { done, url, logged } = await change(req, 'pdf', (s, a) => applyRegister(s, {
       who: a.who, project: a.project, code: body.code, title: body.title, revision: body.revision,
+      dueDate: body.dueDate, dueSource: body.dueSource,
       fileUrl: a.url, fileName: a.fileName, now: a.now,
     }));
     const d = done.drawing;

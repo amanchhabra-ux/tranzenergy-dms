@@ -657,15 +657,20 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       }
       if (d.crsData && d.crsData !== crsData) deleteBlobUrl(d.crsData); // replaced file
       if (!parsed) return { ...d, crsData };
+      // who uploaded this Excel: each row read from it, and the drawing (the server sets both
+      // to the saving user, api/_lib/authz.js stampCrsUploads)
+      const at = new Date().toISOString();
+      const rows = (parsed.comments || []).map(c => ({ ...c, id: c.id || uid('crs'), uploadedBy: currentUser?.id }));
       return {
         ...d,
         ...crsFieldUpdates(d, parsed.meta || {}),
         crsData,
-        crsImported: parsed.comments || [],
+        crsImported: rows,
+        crsUploadedBy: { id: currentUser?.id, name: currentUser?.name || '', role: currentUser?.role || '', at, fileName: fileName || null },
         crsMeta: parsed.meta || {},
         crsLayout: parsed.layout || null,
         crsFileType: parsed.fileType || 'excel',
-        crsRowMap: pinRowMapFromImport(d, parsed.comments || []),
+        crsRowMap: pinRowMapFromImport(d, rows),
         crsFileName: fileName || d.crsFileName || null,
         crsRev: 0, crsSyncedRev: 0, crsSyncError: null,
       };

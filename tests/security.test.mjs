@@ -550,6 +550,91 @@ await test('a consultant comment marks the working Excel for rewrite by an inter
   assert.ok(d.crsRev > d.crsSyncedRev);
 });
 
+// ── Who uploaded a CRS Excel (uploadedBy, crsUploadedBy) ────────────────────────
+const OLD_ROWS = [{ row: 5, sno: '1', comment: 'Old sheet row', commentBy: 'AEL', status: 'Open' }, { row: 6, sno: '2', comment: 'Old second', status: 'Open' }];
+const uploadState = () => {
+  const s = baseState();
+  s.drawings[0].review.stage = 'ir1';
+  Object.assign(s.drawings[0], { crsData: PDF('crs/E-001/1_old.xlsx'), crsFileName: 'old.xlsx', crsImported: structuredClone(OLD_ROWS) });
+  return s;
+};
+
+await test('internal Excel upload: rows and drawing stamped with the saving user even when the client sent another id', async () => {
+  seed(uploadState());
+  const s = stored();
+  const d = s.drawings[0];
+  d.crsData = PDF('crs/E-001/2_new.xlsx'); d.crsFileName = 'new.xlsx';
+  d.crsImported = [
+    { id: 'x1', row: 5, sno: '1', comment: 'Uploaded row one', commentBy: 'AEL', status: 'Open', uploadedBy: 'u1' },
+    { id: 'x2', row: 6, sno: '2', comment: 'Uploaded row two', status: 'Open' },
+  ];
+  d.crsUploadedBy = { id: 'u1', name: 'Aman Chhabra', role: 'Admin', at: '2020-01-01T00:00:00.000Z', fileName: 'new.xlsx' };
+  const r = await post(EMAIL.u2, { state: s, etag: null });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const got = stored().drawings[0];
+  assert.deepEqual(got.crsImported.map(c => c.uploadedBy), ['u2', 'u2']);
+  assert.equal(got.crsUploadedBy.id, 'u2'); assert.equal(got.crsUploadedBy.name, 'Project Manager'); assert.equal(got.crsUploadedBy.role, 'Project Manager');
+  assert.equal(got.crsUploadedBy.fileName, 'new.xlsx');
+  assert.notEqual(got.crsUploadedBy.at, '2020-01-01T00:00:00.000Z', 'time set by the server');
+});
+
+await test('internal save: stored sheet rows keep their uploader (none stays none), a forged change is undone', async () => {
+  const s0 = uploadState();
+  s0.drawings[0].crsImported.push({ id: 'k1', row: 7, sno: '3', comment: 'Kiran upload', status: 'Open', uploadedBy: 'u5' });
+  s0.drawings[0].crsUploadedBy = { id: 'u5', name: 'Viewer', role: 'Viewer', at: '2026-09-27T08:00:00.000Z', fileName: 'k.xlsx' };
+  seed(s0);
+  const s = stored();
+  const d = s.drawings[0];
+  d.crsImported[0].uploadedBy = 'u5';          // an older row without uploader: claimed
+  d.crsImported[1].status = 'Closed';          // an ordinary edit
+  d.crsImported[2].uploadedBy = 'u2';          // someone else's upload: reassigned
+  d.crsUploadedBy = { ...d.crsUploadedBy, id: 'u2', name: 'Project Manager' };
+  d.crsImported.push({ id: 'loc1', local: true, comment: 'Panel row', commentBy: 'Project Manager', authorId: 'u2', status: 'Open', uploadedBy: 'u1' });
+  const r = await post(EMAIL.u2, { state: s, etag: null });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const got = stored().drawings[0];
+  assert.deepEqual(got.crsImported[0], OLD_ROWS[0], 'older row byte-identical');
+  assert.equal(got.crsImported[1].status, 'Closed'); assert.equal('uploadedBy' in got.crsImported[1], false);
+  assert.equal(got.crsImported[2].uploadedBy, 'u5');
+  assert.deepEqual(got.crsUploadedBy, s0.drawings[0].crsUploadedBy);
+  assert.equal('uploadedBy' in got.crsImported[3], false, 'a panel row carries its author, not an uploader');
+});
+
+await test('rewriting the working Excel (sync / issue) does not change who uploaded it', async () => {
+  const s0 = uploadState();
+  s0.drawings[0].crsImported = [{ id: 'k1', row: 5, comment: 'Kiran upload', status: 'Open', uploadedBy: 'u5' }];
+  s0.drawings[0].crsUploadedBy = { id: 'u5', name: 'Viewer', role: 'Viewer', at: '2026-09-27T08:00:00.000Z', fileName: 'k.xlsx' };
+  seed(s0);
+  const s = stored();
+  const d = s.drawings[0];
+  d.crsData = PDF('crs/E-001/3_synced.xlsx');
+  d.crsImported = d.crsImported.map(c => ({ ...c, local: true, row: undefined }));  // issue: rows become sheet rows of the template
+  assert.equal((await post(EMAIL.u2, { state: s, etag: null })).statusCode, 200);
+  const got = stored().drawings[0];
+  assert.equal(got.crsImported[0].uploadedBy, 'u5');
+  assert.deepEqual(got.crsUploadedBy, s0.drawings[0].crsUploadedBy);
+});
+
+await test('consultant cannot set uploadedBy on our rows or their own, and does not see crsUploadedBy', async () => {
+  const s0 = uploadState();
+  s0.drawings[0].review.stage = 'consultant';
+  s0.drawings[0].crsImported = [{ id: 'lTE', local: true, comment: 'TE row', commentBy: 'Project Manager', authorId: 'u2', status: 'Open', uploadedBy: 'u2' }];
+  s0.drawings[0].crsUploadedBy = { id: 'u2', name: 'Project Manager', role: 'Project Manager', at: '2026-09-27T08:00:00.000Z', fileName: 'ours.xlsx' };
+  seed(s0);
+  const v = viewOf('u7');
+  const d = v.drawings.find(x => x.id === 'd1');
+  assert.equal(d.crsUploadedBy, undefined, 'not in the consultant view');
+  d.crsImported[0].uploadedBy = 'u7';
+  d.crsImported.push({ id: 'mine1', local: true, comment: 'Atlanta row', commentBy: 'Aman Chhabra', status: 'Open', uploadedBy: 'u5' });
+  d.crsUploadedBy = { id: 'u7', name: 'Atlanta Engineer', role: 'Consultant', at: 'x', fileName: 'x.xlsx' };
+  assert.equal((await post(EMAIL.u7, { state: v, etag: null })).statusCode, 200);
+  const got = stored().drawings[0];
+  assert.deepEqual(got.crsImported.find(c => c.id === 'lTE'), s0.drawings[0].crsImported[0]);
+  const mine = got.crsImported.find(c => c.id === 'mine1');
+  assert.equal(mine.authorId, 'u7'); assert.equal(mine.commentBy, 'Atlanta Engineer'); assert.equal('uploadedBy' in mine, false);
+  assert.deepEqual(got.crsUploadedBy, s0.drawings[0].crsUploadedBy);
+});
+
 // ── PR 4: category list per project (workflow settings are admin-only) ─────────
 const AEL = [
   { key: '1', label: 'Category-1', desc: 'Approved and Distributed.', closes: true },
