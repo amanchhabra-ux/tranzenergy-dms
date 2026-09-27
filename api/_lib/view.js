@@ -30,6 +30,8 @@ function drawingForExternal(d) {
     crsImported: (d.crsImported || []).filter(c => !hidden(c)),
     crsData: null, crsFileName: null, crsLayout: null, crsRowMap: {}, crsClearRows: [],
   };
+  // the pipeline's retry keys name the ids of rows it added, internal ones included
+  delete out.pipelineAppends;
   // before issue, rows read from the working Excel are TranzEnergy's own, and so is the
   // category we propose (it reaches the consultant on the issued sheet)
   if (d.review && PRE_ISSUE.has(d.review.stage)) {

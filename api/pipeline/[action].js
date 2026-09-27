@@ -1,5 +1,7 @@
-// Token-authenticated API for the review pipeline (one function, four routes):
+// Token-authenticated API for the review pipeline (one function, six routes):
 //   GET  /api/pipeline/drawings?project=<id, code or name>
+//   GET  /api/pipeline/comments?project=…&code=<drawing code>   → the drawing's CRS rows in table order
+//   POST /api/pipeline/append-rows { project, code, rows: [{ text, page?, section?, topic?, status? }], clientKey? }
 //   POST /api/pipeline/upload-url  { project, code, fileName, kind: 'pdf' | 'crs' }  → presigned PUT (files over 3 MB)
 //   POST /api/pipeline/register    { project, code, title?, revision?, fileName, contentBase64 | key }
 //   POST /api/pipeline/attach-crs  { project, code, fileName, contentBase64 | key }
@@ -21,6 +23,7 @@ import { normCode } from '../../src/utils/mdl.js';
 import {
   PipelineError, MAX_INLINE_BYTES, tokenState, pipelineUser, findProject, assertAccess,
   listDrawings, crsSummary, applyRegister, applyAttachCrs, commitChange,
+  drawingComments, applyAppendRows,
 } from '../_lib/pipeline.js';
 
 const fail = (status, error, extra) => { throw new PipelineError(status, error, extra); };
@@ -143,8 +146,38 @@ async function handle(req, res, action) {
     const { state, who, project } = await context(req.query?.project);
     return res.status(200).json({ project: { id: project.id, code: project.code || '', name: project.name || '' }, actingAs: who.email, drawings: listDrawings(state, project) });
   }
+  if (action === 'comments') {
+    if (method !== 'GET') return res.status(405).json({ error: 'method_not_allowed' });
+    const { state, project } = await context(req.query?.project);
+    return res.status(200).json(drawingComments(state, project, req.query?.code));
+  }
   if (method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
   const body = req.body || {};
+
+  if (action === 'append-rows') {
+    const { state, who, project } = await context(body.project, { write: true });
+    const args = { project, code: body.code, rows: body.rows, clientKey: body.clientKey };
+    // decided on the stored document first: a replayed clientKey, or nothing new, writes nothing
+    const first = applyAppendRows(state, { ...args, who });
+    const reply = (r, extra = {}) => res.status(200).json({ added: r.added, skipped: r.skipped, rowIds: r.rowIds, ...(r.replayed ? { replayed: true } : {}), ...extra });
+    if (first.replayed || !first.added) return reply(first);
+    let acting = who;
+    const done = await commitChange({
+      read: () => readState(),
+      write: (text, etag) => writeState(text, etag),
+      apply: (before) => {
+        const w = pipelineUser(before, process.env.PIPELINE_USER_EMAIL, adminEmails());
+        acting = w;
+        const p = findProject(before, project.id);
+        assertAccess(w, p, { write: true });
+        return applyAppendRows(before, { ...args, project: p, who: w, now: new Date().toISOString() });
+      },
+      check: (before, next) => checkSave(before, next, acting),
+    });
+    forgetMembers();
+    const logged = done.entries ? await storeEntries(done.entries) : true;
+    return reply(done, { attempts: done.attempts, ...(logged ? {} : { logWritten: false }) });
+  }
 
   if (action === 'upload-url') {
     const kind = body.kind === 'crs' ? 'crs' : 'pdf';

@@ -2,11 +2,12 @@
 // each call makes to one drawing. Pure functions over the workspace document, so the tests
 // call them directly; the handler reads, applies, checks and writes.
 //
-// Three things only: list a project's drawings, register a received document (new record,
-// an expected MDL record's first file, or a new revision), attach a CRS Excel to a drawing
-// that has no sheet yet. No stage changes, no comments, no deletes, never a sheet replaced.
+// List a project's drawings, register a received document (new record, an expected MDL
+// record's first file, or a new revision), attach a CRS Excel to a drawing that has no sheet
+// yet, read a drawing's CRS rows, and append rows after the existing ones. No stage changes,
+// no deletes, never a sheet replaced, never an existing comment modified.
 import crypto from 'node:crypto';
-import { workflowOn, newReviewFor, isExternal } from '../../src/utils/workflow.js';
+import { workflowOn, newReviewFor, isExternal, PRE_ISSUE } from '../../src/utils/workflow.js';
 import { normCode, proposeDiscipline, nextRevision } from '../../src/utils/mdl.js';
 import { buildCrsTable, crsFieldUpdates, pinRowMapFromImport } from '../../src/utils/crs.js';
 
@@ -235,6 +236,162 @@ export function applyAttachCrs(state, { who, project, code, crsUrl, fileName, pa
     drawing: next, rows: comments.length,
     entries: entriesFor(next, ev('upload', { what: 'crs', fileName: fileName || null, version: d.currentVersion }), log(`CRS uploaded for <strong>${esc(d.code)}</strong> via pipeline.`)),
   };
+}
+
+// ─── Comments: read the CRS table, append rows after it ────────────────────
+/** Comment text as compared for duplicates: lowercase, punctuation stripped, whitespace collapsed. */
+export const normComment = (t) => String(t ?? '').normalize('NFKC').toLowerCase()
+  .replace(/[^\p{L}\p{N}\s]+/gu, ' ').replace(/\s+/g, ' ').trim();
+
+const MAX_ROWS = 200;       // rows in one append-rows call
+const MAX_TEXT = 5000;      // characters in one comment
+const KEEP_APPENDS = 100;   // clientKeys remembered per drawing
+
+function drawingByCode(state, project, code) {
+  const d = findDrawing(state, project, code);
+  if (!d) fail(404, 'drawing_not_found', { code: normCode(code) });
+  return d;
+}
+
+/**
+ * A drawing's CRS rows exactly as the app's CRS table lists them (buildCrsTable: pins first,
+ * then the sheet's rows and the rows added in the CRS panel, in table order), with who wrote
+ * each one where the workspace knows it. Internal rows are included: the pipeline is internal.
+ */
+export function drawingComments(state, project, code) {
+  const d = drawingByCode(state, project, code);
+  const users = (state.users || []).filter(Boolean);
+  const byId = new Map(users.filter(u => u.id != null).map(u => [u.id, u]));
+  const byName = new Map(users.filter(u => u.name).map(u => [String(u.name).trim().toLowerCase(), u]));
+  const pins = new Map((d.pins || []).map(p => [p.id, p]));
+  const rows = buildCrsTable(d).map((r, order) => {
+    let authorId = null;
+    let id = r.key;
+    if (r.kind === 'pin') {
+      const pin = pins.get(r.pinId) || {};
+      const cs = pin.comments || [];
+      const first = cs.find(c => c.type === 'client') || cs[0];
+      authorId = first?.authorId ?? pin.authorId ?? null;
+      id = pin.id ?? r.key;
+    } else {
+      const c = (d.crsImported || [])[r.idx] || {};
+      authorId = c.authorId ?? null;
+      if (c.id) id = c.id;
+    }
+    // rows without an author id (read from an Excel, older comments): by the name, when it is a user's
+    const name = String(r.commentBy || '').replace(/ \(Client\)$/, '').trim().toLowerCase();
+    const user = authorId != null ? byId.get(authorId) : (name ? byName.get(name) : null);
+    return {
+      id: String(id),
+      source: r.kind === 'pin' ? 'pin' : 'crs',
+      pin: r.kind === 'pin' ? (r.pin ?? null) : null,
+      page: r.page === '' || r.page == null ? null : r.page,
+      text: r.comment || '',
+      author: r.commentBy || '',
+      authorId: authorId ?? user?.id ?? null,
+      authorRole: user?.role ?? null,
+      date: r.date || '',
+      status: r.status || 'Open',
+      reply: r.reply || '',
+      replyBy: r.replyBy || '',
+      vis: r.internal ? 'internal' : null,
+      local: r.kind === 'local',
+      order,
+    };
+  });
+  return {
+    code: d.code, drawingId: d.id,
+    currentVersion: d.expected ? null : (d.currentVersion || null),
+    stage: d.review?.stage ?? null, cycle: d.review?.cycle ?? null,
+    rows,
+  };
+}
+
+const cleanField = (v, max) => (v == null ? '' : String(v).replace(/\s+/g, ' ').trim().slice(0, max));
+
+/** The rows of an append-rows body, checked. → [{ text, page, section, topic, status }] */
+export function cleanAppendRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) fail(400, 'rows_required');
+  if (rows.length > MAX_ROWS) fail(413, 'too_many_rows', { maxRows: MAX_ROWS });
+  return rows.map((r, i) => {
+    const text = typeof r?.text === 'string' ? r.text.trim() : '';
+    if (!text) fail(400, 'row_text_required', { index: i });
+    if (text.length > MAX_TEXT) fail(413, 'row_text_too_long', { index: i, maxChars: MAX_TEXT });
+    return {
+      text,
+      page: cleanField(r.page, 40),
+      section: cleanField(r.section, 200),
+      topic: cleanField(r.topic, 200),
+      status: cleanField(r.status, 40) || 'Open',
+    };
+  });
+}
+
+/**
+ * Append rows to a drawing's CRS table as rows added in the CRS panel (updateCrsItems in
+ * src/AppContext.jsx): after every existing row, written by the pipeline user, internal while
+ * the review is before issue. Existing pins and rows are never touched. A row whose text
+ * (normComment) matches a comment already on the drawing, or an earlier row of the same call,
+ * is skipped. A clientKey already used on this drawing returns that call's result, unwritten.
+ * → { state, drawing, added, skipped, rowIds, replayed, entries }
+ */
+export function applyAppendRows(state, { who, project, code, rows, clientKey, now = new Date().toISOString() }) {
+  const user = who.user;
+  const { ev, log } = actor(user, now);
+  const key = clientKey == null || clientKey === '' ? null : String(clientKey).slice(0, 200);
+  const d = drawingByCode(state, project, code);
+  const prior = key ? (d.pipelineAppends || []).find(a => a?.clientKey === key) : null;
+  if (prior) {
+    const rowIds = prior.rowIds || [];
+    return { state, drawing: d, added: prior.added ?? rowIds.length, skipped: prior.skipped ?? 0, rowIds, replayed: true, entries: null };
+  }
+  if (d.expected || !(d.versions || []).length) fail(409, 'no_revision', { code: d.code });
+  const stage = d.review?.stage;
+  // once the CRS is issued the sheet is frozen (consultant, client, closed, resubmit)
+  if (d.review && !PRE_ISSUE.has(stage)) fail(409, 'stage_closed', { code: d.code, stage: stage ?? null });
+  const wanted = cleanAppendRows(rows);
+
+  const seen = new Set();
+  for (const r of buildCrsTable(d)) seen.add(normComment(r.comment));
+  for (const c of d.crsImported || []) seen.add(normComment(c?.comment));
+  for (const p of d.pins || []) for (const c of p?.comments || []) seen.add(normComment(c?.text));
+  seen.delete('');
+
+  // tagNew in src/AppContext.jsx: TranzEnergy's comments before issue are internal
+  const internal = !!d.review && PRE_ISSUE.has(stage);
+  const date = now.slice(0, 10);
+  const items = [];
+  let skipped = 0;
+  for (const r of wanted) {
+    const n = normComment(r.text);
+    if (!n || seen.has(n)) { skipped++; continue; }
+    seen.add(n);
+    items.push({
+      id: uid('crs'), local: true, comment: r.text, commentBy: user.name, date,
+      page: r.page, reply: '', status: r.status,
+      ...(r.section ? { section: r.section } : {}), ...(r.topic ? { topic: r.topic } : {}),
+      authorId: user.id,
+      ...(stage ? { stage, cycle: d.review.cycle } : {}),
+      ...(internal ? { vis: 'internal' } : {}),
+      via: VIA,
+    });
+  }
+  if (!items.length) return { state, drawing: d, added: 0, skipped, rowIds: [], replayed: false, entries: null };
+
+  const rowIds = items.map(c => c.id);
+  const next = {
+    ...d,
+    crsImported: [...(d.crsImported || []), ...items],
+    // an internal tab rewrites the working Excel (bumpCrs(d, true) in src/AppContext.jsx)
+    crsRev: (d.crsRev || 0) + 1,
+    ...(key ? { pipelineAppends: [...(d.pipelineAppends || []), { clientKey: key, at: now, rowIds, added: items.length, skipped }].slice(-KEEP_APPENDS) } : {}),
+  };
+  const vis = internal ? { vis: 'internal' } : {};
+  const entries = {
+    log: [log(`<strong>${esc(user.name)}</strong> added ${items.length} comment${items.length === 1 ? '' : 's'} to the CRS of <strong>${esc(d.code)}</strong> via pipeline.`)],
+    activity: items.map(c => ({ drawingId: String(d.id), entry: { ...ev('comment', { text: snippet(c.comment), ...vis }), drawingId: String(d.id) } })),
+  };
+  return { state: commitDrawing(state, next), drawing: next, added: items.length, skipped, rowIds, replayed: false, entries };
 }
 
 // ─── Read, apply, check, write ─────────────────────────────────────────────
