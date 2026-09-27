@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { getText, strongEtag } from './r2.js';
+import { getText, putText, strongEtag, PreconditionFailed } from './r2.js';
 
 export const localEtag = (text) => `"${crypto.createHash('sha1').update(text).digest('hex')}"`;
 
@@ -21,6 +21,22 @@ export async function readState(knownEtag) {
     return knownEtag && strongEtag(knownEtag) === etag ? { notModified: true, etag } : { text, etag };
   }
   return getText(STATE_KEY, { ifNoneMatch: knownEtag });
+}
+
+/**
+ * Write the workspace document only if it is still the version read (etag). Throws
+ * PreconditionFailed when someone saved in between. Returns the new etag.
+ * Used by the pipeline API; /api/save-state keeps its own write.
+ */
+export async function writeState(text, etag) {
+  if (!etag) throw new PreconditionFailed();
+  if (process.env.LOCAL_DATA_DIR) {
+    const f = path.join(process.env.LOCAL_DATA_DIR, 'db_state.json');
+    if (!fs.existsSync(f) || localEtag(fs.readFileSync(f, 'utf8')) !== strongEtag(etag)) throw new PreconditionFailed();
+    fs.writeFileSync(f, text);
+    return localEtag(text);
+  }
+  return putText(STATE_KEY, text, { ifMatch: etag });
 }
 
 // Before the workspace exists (fresh store) only the owner can sign in, to set it up.

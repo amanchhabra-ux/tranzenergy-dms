@@ -10,7 +10,8 @@ import os from 'node:os'
 // app can run on your machine without touching the live Vercel Blob store.
 // Data lives in ./.local-data (git-ignored).
 function localDevStorage() {
-  const root = path.resolve('.local-data')
+  // LOCAL_DATA_DIR moves it elsewhere (e.g. a scratch folder for a test run)
+  const root = path.resolve(process.env.LOCAL_DATA_DIR || '.local-data')
   const filesDir = path.join(root, 'files')
   const stateFile = path.join(root, 'db_state.json')
   fs.mkdirSync(filesDir, { recursive: true })
@@ -35,14 +36,16 @@ function localDevStorage() {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost')
         // Sign-in and workspace endpoints: run the real API handlers against local files
-        if (['/api/auth', '/api/me', '/api/admin-password', '/api/get-state', '/api/save-state', '/api/org'].includes(url.pathname)) {
+        // the pipeline API is one function with the action in the path
+        const pipeline = /^\/api\/pipeline\/([\w-]+)$/.exec(url.pathname)
+        if (pipeline || ['/api/auth', '/api/me', '/api/admin-password', '/api/get-state', '/api/save-state', '/api/org'].includes(url.pathname)) {
           process.env.LOCAL_DATA_DIR = root
           process.env.LOCAL_SESSION_SECRET = process.env.LOCAL_SESSION_SECRET || 'local-dev-only'
           try {
-            const mod = await server.ssrLoadModule(url.pathname + '.js')
+            const mod = await server.ssrLoadModule(pipeline ? '/api/pipeline/[action].js' : url.pathname + '.js')
             const raw = req.method === 'POST' ? (await readBody(req)).toString('utf8') : ''
             req.body = raw ? JSON.parse(raw) : {}
-            req.query = Object.fromEntries(url.searchParams)
+            req.query = { ...Object.fromEntries(url.searchParams), ...(pipeline ? { action: pipeline[1] } : {}) }
             res.status = (c) => { res.statusCode = c; return res }
             res.json = (o) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); return res }
             res.send = (t) => { res.end(t); return res }
