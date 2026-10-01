@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   DEFAULT_CATEGORIES, AEL_CATEGORIES, categoriesOf, findCategory, categoryText, reviewWithCategory, reviewWithProposed, categoriesInUse, newReviewFor,
-  reviewWithDue, canEditDue, DEFAULT_DUE_SOURCE, addDays, today,
+  reviewWithDue, canEditDue, DEFAULT_DUE_SOURCE, addDays, today, dueState,
 } from '../src/utils/workflow.js';
 import { TE002_MDL_COLUMNS, cellValue } from '../src/utils/mdl.js';
 
@@ -22,6 +22,12 @@ const col = (key) => TE002_MDL_COLUMNS.find(c => c.key === key);
 const plain = { workflow: { enabled: true } };                               // never set a list
 const legacyFormat = { workflow: { enabled: true, categoryFormat: 'Category-{key}' } };
 const ael = { workflow: { enabled: true, categories: AEL_CATEGORIES } };
+
+test('the due date shows only before the CRS is issued (ir1, ir2, approval)', () => {
+  const past = addDays(today(), -3);
+  for (const stage of ['ir1', 'ir2', 'approval']) assert.equal(dueState({ stage, dueDate: past }).kind, 'overdue', stage);
+  for (const stage of ['consultant', 'client', 'resubmit', 'closed']) assert.equal(dueState({ stage, dueDate: past }).kind, 'none', stage);
+});
 
 test('a project without workflow.categories keeps the default list (1, 2, 3, 4B)', () => {
   assert.deepEqual(categoriesOf(plain.workflow).map(c => c.key), ['1', '2', '3', '4B']);

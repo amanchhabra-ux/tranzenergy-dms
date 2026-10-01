@@ -236,8 +236,10 @@ export function reviewWithDue(review, { dueDate, dueSource }, { entry } = {}) {
 }
 
 /** Due-date state for display. */
+// The due date is TranzEnergy's: it is met once the CRS is issued, so it shows only before issue
+// (ir1, ir2, approval). With the consultant or the client, or closed, nothing is due from us.
 export function dueState(review) {
-  if (!review?.dueDate || review.stage === 'closed' || review.stage === 'resubmit') return { kind: 'none', text: '' };
+  if (!review?.dueDate || !PRE_ISSUE.has(review.stage)) return { kind: 'none', text: '' };
   const left = daysBetween(today(), review.dueDate);
   if (left < 0) return { kind: 'overdue', text: `${-left} day${left === -1 ? '' : 's'} overdue`, left };
   if (left === 0) return { kind: 'soon', text: 'Due today', left };
