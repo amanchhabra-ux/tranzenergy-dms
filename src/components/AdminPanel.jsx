@@ -6,10 +6,11 @@ import { LoadMore } from './ActivityPanel';
 import { fileSlug } from '../utils/org';
 import { isStoredFile } from '../utils/uploadFile';
 import { UserPasswordModal, generatePassword, setUserPassword } from './UserPasswordModal';
-import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound, Building2 } from 'lucide-react';
+import { SUPER_ROLE, VIEWER_ROLE, isAdminRole, hasSuperUser } from '../utils/roles';
+import { Users, Shield, Folder, Activity, Plus, Trash2, Edit2, X, Check, Database, Download, Upload, KeyRound, Building2, Crown } from 'lucide-react';
 
 const ROLE_COLORS = {
-  'Admin': '#3f7d3a', 'Project Manager': '#2a4439',
+  [SUPER_ROLE]: '#c2410c', 'Admin': '#3f7d3a', 'Project Manager': '#2a4439',
   'Senior Engineer': '#15803d', 'Engineer': '#d97706', 'Viewer': '#a1a1aa',
   'Consultant': '#0369a1', // outside consultant: sees only assigned projects
 };
@@ -17,7 +18,13 @@ const ROLE_COLORS = {
 const AVATAR_COLORS = ['#3f7d3a','#2a4439','#15803d','#d97706','#7c3aed','#be185d','#0f766e','#2f6a2f','#0369a1','#52525b'];
 
 export function AdminPanel({ initialTab = 'users' }) {
-  const { users, projects, drawings, proposals, activityLog, logHasMore, loadMoreLog, addLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings, serverWarnings = [] } = useContext(AppContext);
+  const { users, projects, drawings, proposals, activityLog, logHasMore, loadMoreLog, addLog, ROLES, createUser, updateUser, deleteUser, deleteProject, assignUsersToProject, currentUser, importWorkspaceData, DISCIPLINES, saveNow, allowEmptySave, org, orgSettings, serverWarnings = [], isSuper } = useContext(AppContext);
+  const amAdmin = isAdminRole(currentUser?.role);
+  // roles this person may give: only a Super User makes Admins and Super Users
+  const grantable = ROLES.filter(r => isSuper || !isAdminRole(r));
+  // an Admin's or Super User's record is managed by a Super User only
+  const canManage = (u) => isSuper || !isAdminRole(u.role);
+  const canClaimSuper = currentUser?.role === 'Admin' && !hasSuperUser(users);
   const [tab, setTab] = useState(initialTab);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -135,14 +142,18 @@ export function AdminPanel({ initialTab = 'users' }) {
       // 2. clear the workspace
       setImportStatus('Clearing the workspace…');
       allowEmptySave(); // deliberate: the only time an empty workspace may overwrite the saved one
-      importWorkspaceData({
-        users: [
+      const me = (u) => String(u.email).toLowerCase() === String(currentUser?.email || '').toLowerCase();
+      const seed = [
           { id: 'u1', name: 'Aman Chhabra',    email: 'aman@tranzenergy.in',      role: 'Admin',           avatar: 'AC', color: '#3f7d3a' },
           { id: 'u2', name: 'Project Manager', email: 'pm@tranzenergy.in',         role: 'Project Manager', avatar: 'PM', color: '#2a4439' },
           { id: 'u3', name: 'Sr. Engineer',    email: 'sr.eng@tranzenergy.in',     role: 'Senior Engineer', avatar: 'SE', color: '#15803d' },
           { id: 'u4', name: 'Engineer',        email: 'eng@tranzenergy.in',        role: 'Engineer',        avatar: 'EN', color: '#d97706' },
           { id: 'u5', name: 'Viewer',          email: 'viewer@tranzenergy.in',     role: 'Viewer',          avatar: 'VW', color: '#a1a1aa' },
-        ],
+      ];
+      // the person resetting keeps their account and role (a Super User stays one)
+      const keepMe = seed.some(me) ? seed.map(u => (me(u) ? { ...u, id: currentUser.id, role: currentUser.role } : u)) : [currentUser, ...seed];
+      importWorkspaceData({
+        users: keepMe,
         projects: [],
         drawings: [],
         proposals: [],
@@ -161,7 +172,7 @@ export function AdminPanel({ initialTab = 'users' }) {
   };
 
   const tabs = [
-    ...(currentUser?.role === 'Admin' ? [
+    ...(amAdmin ? [
       { key: 'users', label: 'Users', icon: Users },
       { key: 'projects', label: 'Projects', icon: Folder },
       { key: 'activity', label: 'Audit Log', icon: Activity },
@@ -180,7 +191,7 @@ export function AdminPanel({ initialTab = 'users' }) {
           </div>
           <div className="page-header-sub">Manage team, projects and permissions</div>
         </div>
-        {tab === 'users' && (
+        {tab === 'users' && amAdmin && (
           <button className="btn btn-primary btn-sm" onClick={() => setShowAddUser(true)}>
             <Plus size={14} />Add User
           </button>
@@ -210,6 +221,17 @@ export function AdminPanel({ initialTab = 'users' }) {
         {/* ── Users Tab ───────────────────────────────────────────────────── */}
         {tab === 'users' && (
           <div>
+            {canClaimSuper && (
+              <div className="card" style={{ padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', border: `1px solid ${ROLE_COLORS[SUPER_ROLE]}40` }}>
+                <Crown size={18} style={{ color: ROLE_COLORS[SUPER_ROLE], flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 220, fontSize: 13, lineHeight: 1.5 }}>
+                  <strong>No Super User yet.</strong> A Super User is the only one who can add projects, give Viewers access to projects and manage Admins. Until there is one, every Admin can do these.
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => {
+                  if (window.confirm('Make yourself the Super User?\n\nAfter this, other Admins can no longer add projects, give Viewers access, or change Admins. Only a Super User can change your role later.')) updateUser(currentUser.id, { role: SUPER_ROLE });
+                }}><Crown size={13} />Make me Super User</button>
+              </div>
+            )}
             <div className="table-wrapper">
               <table className="data-table">
                 <thead>
@@ -244,7 +266,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                               style={{ padding: '4px 8px', fontSize: '12px', width: 'auto' }}
                               id={`role-select-${u.id}`}
                             >
-                              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                              {grantable.map(r => <option key={r} value={r}>{r}</option>)}
                             </select>
                             <button className="btn btn-primary btn-sm btn-icon" onClick={() => {
                               const sel = document.getElementById(`role-select-${u.id}`);
@@ -263,13 +285,17 @@ export function AdminPanel({ initialTab = 'users' }) {
                           <span style={{ fontSize: 11, alignSelf: 'center', marginRight: 6, color: pwStatus[String(u.email || '').toLowerCase()] ? 'var(--success)' : 'var(--warning)' }}>
                             {pwStatus[String(u.email || '').toLowerCase()] ? 'Password set' : 'No password'}
                           </span>
-                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setPwUser(u)} title={pwStatus[String(u.email || '').toLowerCase()] ? 'Reset password' : 'Set password'}>
-                            <KeyRound size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditUserId(u.id)} title="Edit role">
-                            <Edit2 size={13} />
-                          </button>
-                          {u.id !== currentUser.id && (
+                          {canManage(u) && u.id !== currentUser.id && (
+                            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setPwUser(u)} title={pwStatus[String(u.email || '').toLowerCase()] ? 'Reset password' : 'Set password'}>
+                              <KeyRound size={13} />
+                            </button>
+                          )}
+                          {canManage(u) && u.id !== currentUser.id && (
+                            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditUserId(u.id)} title="Edit role">
+                              <Edit2 size={13} />
+                            </button>
+                          )}
+                          {canManage(u) && u.id !== currentUser.id && (
                             <button className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--error)' }} onClick={() => {
                               if (!window.confirm(`Remove ${u.name}? They will no longer be able to sign in.`)) return;
                               fetch('/api/admin-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: u.email, remove: true }) }).then(loadPwStatus).catch(() => {});
@@ -366,7 +392,7 @@ export function AdminPanel({ initialTab = 'users' }) {
         )}
 
         {/* ── Organisation Tab ───────────────────────────────────────────────── */}
-        {tab === 'org' && currentUser?.role === 'Admin' && <OrgSettings />}
+        {tab === 'org' && amAdmin && <OrgSettings />}
 
         {/* ── Backup & Sync Tab ──────────────────────────────────────────────── */}
         {tab === 'backup' && (
@@ -383,7 +409,7 @@ export function AdminPanel({ initialTab = 'users' }) {
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: currentUser?.role === 'Admin' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isSuper ? '1fr 1fr 1fr' : '1fr 1fr', gap: '16px' }}>
               {/* Export Panel */}
               <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
                 <div>
@@ -412,8 +438,8 @@ export function AdminPanel({ initialTab = 'users' }) {
                 </label>
               </div>
 
-              {/* Reset Panel - Admin Only */}
-              {currentUser?.role === 'Admin' && (
+              {/* Reset Panel - Super User only */}
+              {isSuper && (
                 <div className="card" style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', gap: '12px', border: '1px solid rgba(239, 68, 68, 0.15)' }}>
                   <div>
                     <h4 style={{ fontWeight: 600, fontSize: '14px', margin: '0 0 6px 0', color: '#dc2626' }}>3. Reset Instance</h4>
@@ -429,7 +455,7 @@ export function AdminPanel({ initialTab = 'users' }) {
               )}
             </div>
 
-            {currentUser?.role === 'Admin' && <StorageMigration />}
+            {amAdmin && <StorageMigration />}
 
             {importStatus && (
               <div className="card" style={{ padding: '12px 16px', fontSize: '13px', background: importStatus.includes('successfully') ? 'var(--success-glow)' : 'rgba(239,68,68,0.1)', border: importStatus.includes('successfully') ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)', color: importStatus.includes('successfully') ? '#10b981' : '#dc2626', borderRadius: '6px', textAlign: 'center', fontWeight: 500 }}>
@@ -461,7 +487,7 @@ export function AdminPanel({ initialTab = 'users' }) {
                 <div className="form-group">
                   <label className="form-label">Role *</label>
                   <select className="form-input" value={form.role} onChange={e => setForm(f=>({...f,role:e.target.value}))}>
-                    {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    {grantable.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
@@ -489,6 +515,7 @@ export function AdminPanel({ initialTab = 'users' }) {
         <ManageProjectUsersModal
           project={projects.find(p => p.id === manageUsersProjectId)}
           users={users}
+          canAssignViewers={isSuper}
           onClose={() => setManageUsersProjectId(null)}
           onSave={(userIds) => {
             assignUsersToProject(manageUsersProjectId, userIds);
@@ -500,7 +527,7 @@ export function AdminPanel({ initialTab = 'users' }) {
   );
 }
 
-function ManageProjectUsersModal({ project, users, onClose, onSave }) {
+function ManageProjectUsersModal({ project, users, canAssignViewers, onClose, onSave }) {
   const [selectedUsers, setSelectedUsers] = useState(new Set(project.assignedUsers || []));
 
   const toggleUser = (uid) => {
@@ -520,7 +547,8 @@ function ManageProjectUsersModal({ project, users, onClose, onSave }) {
         <div className="modal-body" style={{ maxHeight: '400px', overflowY: 'auto' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
             Select the users who should have access to <strong>{project.code}</strong>.
-            (Note: Admins have access to all projects automatically).
+            (Note: Super Users and Admins have access to all projects automatically).
+            {!canAssignViewers && <><br />Viewers are given access by a Super User.</>}
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {users.map(u => (
@@ -529,11 +557,11 @@ function ManageProjectUsersModal({ project, users, onClose, onSave }) {
                   type="checkbox"
                   checked={selectedUsers.has(u.id)}
                   onChange={() => toggleUser(u.id)}
-                  disabled={u.role === 'Admin'}
+                  disabled={isAdminRole(u.role) || (u.role === VIEWER_ROLE && !canAssignViewers)}
                   style={{ accentColor: 'var(--primary-light)' }}
                 />
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{u.name} {u.role === 'Admin' && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>(Admin - auto access)</span>}</div>
+                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{u.name} {isAdminRole(u.role) && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({u.role} - auto access)</span>}</div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{u.role}{u.email ? ` · ${u.email}` : ''}</div>
                 </div>
               </label>

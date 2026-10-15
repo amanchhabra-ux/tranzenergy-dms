@@ -5,6 +5,7 @@ import { workflowOn, isExternal, PRE_ISSUE, NEXT_STAGE, STAGE, findCategory, cat
 import { uploadCrsFile, isStoredFile } from './utils/uploadFile';
 import { orgOf, applyOrgTheme, cacheOrg } from './utils/org';
 import { nextRevision } from './utils/mdl';
+import { SUPER_ROLE, VIEWER_ROLE, isAdminRole, actsAsSuper } from './utils/roles';
 import { applyPlan } from './utils/mdlImport';
 import { queueLog, queueActivity, flushOutbox, fetchLog, fetchRecentActivity, mergeEntries } from './utils/logClient';
 
@@ -54,7 +55,7 @@ const mergeUsers = (a = [], b = []) => {
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const PROJECT_TYPES = ['transmission', 'solar', 'bess', 'wind'];
 const STATUSES = ['IFA', 'AFC', 'Superseded'];
-const ROLES = ['Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer', EXTERNAL_ROLE];
+const ROLES = [SUPER_ROLE, 'Admin', 'Project Manager', 'Senior Engineer', 'Engineer', 'Viewer', EXTERNAL_ROLE];
 const SEED_PROPOSALS = [];
 
 const STORAGE_KEY = 'tranzenergy_v5';
@@ -465,23 +466,26 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
   }, [users, loading, me, clerkEmail, accessDenied]);
 
   // ─── Permissions ───────────────────────────────────────────────────────────
+  // Super User: adds projects, gives Viewers project access, manages Admins (utils/roles.js)
+  const isSuper = useMemo(() => actsAsSuper(currentUser, users), [currentUser, users]);
   const canDo = useCallback((action) => {
-    // action: 'admin' | 'manage_projects' | 'upload' | 'approve' | 'view'
+    // action: 'super' | 'create_project' | 'admin' | 'manage_projects' | 'upload' | 'approve' | 'view'
     if (!currentUser) return false;
     const r = currentUser.role;
+    if (action === 'super' || action === 'create_project') return isSuper;
     if (r === EXTERNAL_ROLE) {
       // outside consultant (e.g. Atlanta): uploads submissions and comments, nothing else
       return action === 'upload' || action === 'view';
     }
     if (action === 'sync') return true; // CRS Excel rewriting: internal users only
-    if (r === 'Admin') return true;
+    if (isAdminRole(r)) return true;
     if (action === 'admin') return false;
     if (action === 'manage_projects') return r === 'Project Manager';
     if (action === 'upload') return ['Project Manager','Senior Engineer','Engineer'].includes(r);
     if (action === 'approve') return ['Project Manager','Senior Engineer'].includes(r);
     if (action === 'view') return true;
     return false;
-  }, [currentUser]);
+  }, [currentUser, isSuper]);
 
   // New comments made by TranzEnergy before the CRS is issued stay internal
   // (hidden from the consultant) until the approver submits them.
@@ -512,7 +516,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
   // ─── Projects ──────────────────────────────────────────────────────────────
   const createProject = (data) => {
-    if (!canDo('manage_projects')) return;
+    if (!canDo('create_project')) return;
     const assignedUsers = Array.from(new Set(['u1', currentUser?.id].filter(Boolean)));
     const p = { id: `p-${Date.now()}`, startDate: new Date().toISOString().split('T')[0], status: 'active', assignedUsers, ...data };
     setProjects(prev => [...prev, p]);
@@ -542,7 +546,14 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
 
   const assignUsersToProject = (projectId, userIds) => {
     if (!canDo('admin')) return;
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, assignedUsers: userIds } : p));
+    // only a Super User changes which Viewers see a project; an Admin's change keeps them as they were
+    const viewers = new Set(users.filter(u => u.role === VIEWER_ROLE).map(u => u.id));
+    setProjects(prev => prev.map(p => {
+      if (p.id !== projectId) return p;
+      if (canDo('super')) return { ...p, assignedUsers: userIds };
+      const keep = (p.assignedUsers || []).filter(id => viewers.has(id));
+      return { ...p, assignedUsers: [...userIds.filter(id => !viewers.has(id)), ...keep] };
+    }));
     addLog(`Updated user assignments for project.`);
   };
 
@@ -1183,7 +1194,7 @@ export function AppProvider({ children, authMode = 'password', clerkEmail = '', 
       org: orgOf(org), orgSettings: org, updateOrg,
       authMode, accessDenied, onSignOut, needsLogin, mustChangePassword,
       // Consts
-      DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES,
+      DISCIPLINES: disciplines, PROJECT_TYPES, STATUSES, ROLES, isSuper,
       // Auth
       login, logout,
       // server configuration problems an admin should see (e.g. 'session_secret'), from /api/me

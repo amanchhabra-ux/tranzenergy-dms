@@ -12,6 +12,7 @@
 // RPCL arrangement (26.09.2026) — no separate final check:
 //   Atlanta uploads (with a note) → TE Engineer 1 reviews → TE Review Engineer downloads, reviews, adds CRS comments
 //   and marks it ready → CRS issued to Atlanta → Atlanta sends it to RPCL → RPCL category.
+import { isAdminRole } from './roles.js';
 
 export const STAGES = [
   { key: 'ir1',        step: 3, label: 'TE Engineer 1',      short: 'TE Eng 1', who: 'firstReviewers',  action: 'Mark my review done' },
@@ -198,7 +199,7 @@ export function stageActors(project, stageKey) {
 
 export function canActOnStage(user, project, stageKey) {
   if (!user || !stageKey || stageKey === 'closed') return false;
-  if (user.role === 'Admin' && !isExternal(user)) return true;
+  if (isAdminRole(user.role) && !isExternal(user)) return true;
   return stageActors(project, stageKey).includes(user.id);
 }
 
@@ -209,7 +210,7 @@ export function canActOnStage(user, project, stageKey) {
  */
 export function canEditDue(user, project) {
   if (!user || isExternal(user)) return false;
-  if (user.role === 'Admin') return true;
+  if (isAdminRole(user.role)) return true;
   const wf = project?.workflow || {};
   return (wf.approvers || []).includes(user.id) || stageActors(project, issuingStage(wf)).includes(user.id);
 }
@@ -272,7 +273,7 @@ export function waitingOn(user, projects, drawings) {
     if (!p || !workflowOn(p) || !r || r.stage === 'closed') continue;
     if (!canActOnStage(user, p, r.stage)) continue;
     // admins see only what's assigned to them, plus anything nobody is assigned to
-    if (user.role === 'Admin' && !isExternal(user) && stageActors(p, r.stage).length && !stageActors(p, r.stage).includes(user.id)) continue;
+    if (isAdminRole(user.role) && !isExternal(user) && stageActors(p, r.stage).length && !stageActors(p, r.stage).includes(user.id)) continue;
     out.push({ drawing: d, project: p, review: r, due: dueState(r) });
   }
   const rank = { overdue: 0, soon: 1, ok: 2, none: 3 };

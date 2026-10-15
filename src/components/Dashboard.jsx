@@ -2,6 +2,7 @@ import React, { useContext, useState } from 'react';
 import { AppContext } from '../AppContext';
 import { LoadMore } from './ActivityPanel';
 import { Zap, Sun, Battery, Wind, FileText, CheckCircle, Clock, AlertCircle, Plus, ArrowRight } from 'lucide-react';
+import { isAdminRole } from '../utils/roles';
 
 const TYPE_META = {
   transmission: { label: 'Transmission Line', color: '#2a4439', icon: Zap,     cls: 'type-transmission' },
@@ -16,7 +17,7 @@ export function Dashboard({ onOpenProject }) {
   const [showNewProject, setShowNewProject] = React.useState(false);
   const [form, setForm] = React.useState({ code:'', name:'', client:'', clientContact:'', type:'transmission', location:'' });
 
-  const filteredProjects = projects.filter(p => currentUser.role === 'Admin' || p.assignedUsers?.includes(currentUser.id));
+  const filteredProjects = projects.filter(p => isAdminRole(currentUser.role) || p.assignedUsers?.includes(currentUser.id));
   const filteredDrawings = drawings.filter(d => filteredProjects.some(p => p.id === d.projectId));
 
   const totalDrawings = filteredDrawings.length;
@@ -46,7 +47,7 @@ export function Dashboard({ onOpenProject }) {
           <div className="page-header-title">Good day, {currentUser.name.split(' ')[0]} 👋</div>
           <div className="page-header-sub">{currentUser.role} · {new Date().toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</div>
         </div>
-        {canDo('manage_projects') && (
+        {canDo('create_project') && (
           <button className="btn btn-primary btn-sm" onClick={() => setShowNewProject(true)}>
             <Plus size={14} /><span>New Project</span>
           </button>
@@ -74,7 +75,7 @@ export function Dashboard({ onOpenProject }) {
           })}
         </div>
 
-        <div className="dashboard-grid" style={{ gridTemplateColumns: currentUser.role === 'Admin' ? '1fr 360px' : '1fr' }}>
+        <div className="dashboard-grid" style={{ gridTemplateColumns: isAdminRole(currentUser.role) ? '1fr 360px' : '1fr' }}>
           {/* Projects */}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
@@ -116,7 +117,7 @@ export function Dashboard({ onOpenProject }) {
           </div>
 
           {/* Activity feed */}
-          {currentUser.role === 'Admin' && (
+          {isAdminRole(currentUser.role) && (
             <div>
               <div style={{ marginBottom: '14px' }}>
                 <h3 style={{ fontSize: '15px' }}>Recent Activity</h3>

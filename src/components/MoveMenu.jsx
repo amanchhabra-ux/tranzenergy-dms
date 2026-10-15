@@ -1,5 +1,6 @@
 import { useContext } from 'react';
 import { AppContext } from '../AppContext';
+import { isAdminRole } from '../utils/roles';
 
 const SECTION = { padding: '8px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', background: 'var(--bg-card-hover)' };
 const ITEM = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 14px', background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer' };
@@ -11,7 +12,7 @@ export function MoveMenu({ drawing, colors = {}, onDone, style }) {
   if (!drawing) return null;
 
   const otherProjects = projects.filter(p =>
-    p.id !== drawing.projectId && (currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id)));
+    p.id !== drawing.projectId && (isAdminRole(currentUser?.role) || p.assignedUsers?.includes(currentUser?.id)));
 
   const toProject = (p) => {
     const clash = drawings.some(d => d.projectId === p.id && d.id !== drawing.id && (d.code || '').trim().toLowerCase() === (drawing.code || '').trim().toLowerCase());

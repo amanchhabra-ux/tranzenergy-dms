@@ -2,6 +2,7 @@ import { createClerkClient } from '@clerk/backend';
 import { memberMap } from './state.js';
 import { readSession } from './session.js';
 import { readCreds } from './creds.js';
+import { isAdminRole, actsAsSuper } from '../../src/utils/roles.js';
 
 // Two sign-in modes:
 //  - Clerk (Google / Microsoft / email code) when CLERK_SECRET_KEY is set — currently on hold
@@ -57,9 +58,9 @@ export async function signedInUser(req) {
 }
 
 /**
- * Guard for API routes. Returns { email, user, role, isAdmin } or sends 401/403 and returns null.
+ * Guard for API routes. Returns { email, user, role, isAdmin, isSuper } or sends 401/403 and returns null.
  *  members: false → only needs to be signed in (used by /api/me)
- *  admin: true    → must be an Admin
+ *  admin: true    → must be an Admin or Super User
  */
 export async function requireUser(req, res, { members = true, admin = false } = {}) {
   let who;
@@ -67,9 +68,10 @@ export async function requireUser(req, res, { members = true, admin = false } = 
   if (!who || !who.email) { res.status(401).json({ error: 'signed_out' }); return null; }
   const map = await memberMap();
   const user = map.get(who.email) || null;
-  const isAdmin = user?.role === 'Admin' || adminEmails().has(who.email);
+  const isAdmin = isAdminRole(user?.role) || adminEmails().has(who.email);
+  const isSuper = isAdmin && actsAsSuper(user, [...map.values()], { adminByEmail: !user });
   if (members && !user && !isAdmin) { res.status(403).json({ error: 'no_access', email: who.email }); return null; }
   if (who.mustChangePassword && members) { res.status(403).json({ error: 'must_change_password' }); return null; }
   if (admin && !isAdmin) { res.status(403).json({ error: 'admin_only' }); return null; }
-  return { ...who, user, role: user?.role || (isAdmin ? 'Admin' : null), isAdmin };
+  return { ...who, user, role: user?.role || (isAdmin ? 'Admin' : null), isAdmin, isSuper };
 }
