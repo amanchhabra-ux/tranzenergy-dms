@@ -2,7 +2,11 @@
 // The posted document replaces the stored one, so the parts that grant power
 // (the user list and roles, organisation settings, each project's review workflow and
 // who is assigned to it) may only change when an admin saves. Nobody may change their
-// own role here.
+// own role here (except an Admin making themselves the first Super User).
+// A Super User (src/utils/roles.js) is the only one who adds projects, changes which Viewers
+// see a project, and adds, changes or removes Admins and Super Users.
+
+import { SUPER_ROLE, ADMIN_ROLE, VIEWER_ROLE, isAdminRole, hasSuperUser, actsAsSuper } from '../../src/utils/roles.js';
 
 // Compare two values ignoring key order and the order of records with an id.
 function canon(v) {
@@ -33,21 +37,55 @@ const assigned = (p) => [...new Set(p?.assignedUsers || [])].sort();
  */
 export function checkSave(before, next, who) {
   const adminOnly = { status: 403, error: 'admin_only' };
+  const superOnly = { status: 403, error: 'super_only' };
   // creating the workspace: admins only (on a fresh store the bootstrap owner is the admin)
   if (!before) return who?.isAdmin ? null : adminOnly;
 
-  // nobody changes their own role, or removes their own record, through this endpoint
+  // Super User powers come from the stored workspace, never from what the browser sends
+  const isSuper = !!who?.isAdmin && actsAsSuper(who?.user, before.users, { adminByEmail: !who?.user });
+
+  // nobody changes their own role, or removes their own record, through this endpoint.
+  // One exception: while there is no Super User, an Admin may make themselves the first one.
   const myId = who?.user?.id;
   if (myId != null) {
     const was = (before.users || []).find(u => u && u.id === myId);
     const now = (next.users || []).find(u => u && u.id === myId);
-    if (was && (!now || (now.role ?? null) !== (was.role ?? null))) return { status: 403, error: 'own_role' };
+    const claimSuper = was?.role === ADMIN_ROLE && now?.role === SUPER_ROLE && !hasSuperUser(before.users);
+    if (was && (!now || ((now.role ?? null) !== (was.role ?? null) && !claimSuper))) return { status: 403, error: 'own_role' };
   }
 
-  if (who?.isAdmin) return null;
   // avatar colours are cosmetic, and every browser rewrites old palette colours on load
   // (recolorUsers in src/AppContext.jsx): a colour-only difference is not a change
   const noColour = (list) => (list || []).map(u => (u && typeof u === 'object' ? { ...u, color: undefined } : u));
+
+  // projects are added by a Super User
+  const had = new Set((before.projects || []).filter(p => p && p.id != null).map(p => p.id));
+  if (!isSuper && (next.projects || []).some(p => p && p.id != null && !had.has(p.id))) return superOnly;
+
+  // ── an Admin who is not the Super User ──
+  if (who?.isAdmin && !isSuper) {
+    // Admins and Super Users are added, changed and removed by a Super User (own record:
+    // the role rule above already applies)
+    const byId = (list) => new Map((list || []).filter(u => u && u.id != null).map(u => [String(u.id), u]));
+    const ub = byId(noColour(before.users)), un = byId(noColour(next.users));
+    for (const id of new Set([...ub.keys(), ...un.keys()])) {
+      if (myId != null && id === String(myId)) continue;
+      const a = ub.get(id), b = un.get(id);
+      if (!isAdminRole(a?.role) && !isAdminRole(b?.role)) continue;
+      if (!same(a ?? null, b ?? null)) return superOnly;
+    }
+    // a Viewer's access to a project is given by a Super User
+    const viewers = new Set([...(before.users || []), ...(next.users || [])].filter(u => u?.role === VIEWER_ROLE).map(u => u.id));
+    const nextById = new Map((next.projects || []).filter(p => p && p.id != null).map(p => [p.id, p]));
+    for (const p of before.projects || []) {
+      const n = p && p.id != null ? nextById.get(p.id) : null;
+      if (!n) continue; // a deleted project takes its assignments with it
+      const v = (x) => assigned(x).filter(id => viewers.has(id));
+      if (!same(v(p), v(n))) return superOnly;
+    }
+  }
+
+  if (who?.isAdmin) return null;
   if (!same(noColour(before.users), noColour(next.users))) return adminOnly;
   if ('org' in next && !same(before.org ?? {}, next.org ?? {})) return adminOnly;
   const wb = workflows(before), wn = workflows(next);

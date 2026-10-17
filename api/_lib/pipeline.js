@@ -9,6 +9,7 @@
 import crypto from 'node:crypto';
 import { workflowOn, newReviewFor, reviewWithDue, isExternal, PRE_ISSUE } from '../../src/utils/workflow.js';
 import { normCode, proposeDiscipline, nextRevision } from '../../src/utils/mdl.js';
+import { SUPER_ROLE, isAdminRole } from '../../src/utils/roles.js';
 import { buildCrsTable, crsFieldUpdates, pinRowMapFromImport } from '../../src/utils/crs.js';
 
 export const VIA = 'pipeline';
@@ -16,7 +17,7 @@ export const VIA = 'pipeline';
 // and larger ones go through upload-url (a presigned PUT straight to storage)
 export const MAX_INLINE_BYTES = 3 * 1024 * 1024;
 // roles that upload in the app (canDo('upload') in src/AppContext.jsx)
-const UPLOAD_ROLES = new Set(['Admin', 'Project Manager', 'Senior Engineer', 'Engineer']);
+const UPLOAD_ROLES = new Set([SUPER_ROLE, 'Admin', 'Project Manager', 'Senior Engineer', 'Engineer']);
 
 export class PipelineError extends Error {
   constructor(status, error, extra = {}) { super(error); this.status = status; this.error = error; this.extra = extra; }
@@ -48,7 +49,7 @@ export function pipelineUser(state, email = process.env.PIPELINE_USER_EMAIL, adm
   const user = (state?.users || []).find(u => String(u?.email || '').trim().toLowerCase() === e);
   if (!user) fail(403, 'pipeline_user_unknown');
   if (isExternal(user)) fail(403, 'pipeline_user_external');
-  return { email: e, user, role: user.role, isAdmin: user.role === 'Admin' || admins.has(e) };
+  return { email: e, user, role: user.role, isAdmin: isAdminRole(user.role) || admins.has(e) };
 }
 
 // ─── Lookups ───────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ export function findProject(state, ref) {
 
 /** Projects the user sees in the app (ProjectView): admins all, others the assigned ones. */
 export function assertAccess(who, project, { write = false } = {}) {
-  if (who.user.role !== 'Admin' && !(project.assignedUsers || []).includes(who.user.id)) fail(403, 'project_not_assigned');
+  if (!isAdminRole(who.user.role) && !(project.assignedUsers || []).includes(who.user.id)) fail(403, 'project_not_assigned');
   if (write && !UPLOAD_ROLES.has(who.user.role)) fail(403, 'role_cannot_upload', { role: who.user.role });
 }
 

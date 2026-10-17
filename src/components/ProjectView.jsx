@@ -18,6 +18,7 @@ import { uploadFile, uploadCrsFile } from '../utils/uploadFile';
 import { CrsPicker } from './CrsPicker';
 import { readCrs } from '../utils/crs';
 import { normCode } from '../utils/mdl';
+import { isAdminRole } from '../utils/roles';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/legacy/build/pdf.worker.mjs',
@@ -64,7 +65,7 @@ export function ProjectView({ projectId, onBack, initialDrawingId = null }) {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [movingDrawingId, setMovingDrawingId] = useState(null);
 
-  const hasAccess = currentUser?.role === 'Admin' || project?.assignedUsers?.includes(currentUser?.id);
+  const hasAccess = isAdminRole(currentUser?.role) || project?.assignedUsers?.includes(currentUser?.id);
 
   if (!project || !hasAccess) {
     return (

@@ -3,6 +3,7 @@ import { readCreds, updateCreds, hashPassword, checkPassword, passwordProblem } 
 import { memberMap, forgetMembers } from './_lib/state.js';
 import { makeSessionCookie, clearSessionCookie, isSecureRequest, readSession } from './_lib/session.js';
 import { adminEmails } from './_lib/auth.js';
+import { isAdminRole } from '../src/utils/roles.js';
 
 // POST { action: 'login', email, password }
 // POST { action: 'logout' }
@@ -23,7 +24,7 @@ const same = (a, b) => {
 /** May this sign-in start the first-admin setup? (no stored password for `email`) */
 export function bootstrapAllowed({ email, password, user, members, creds, env = process.env }) {
   const admins = adminEmails();
-  const isAdmin = (u, e) => u?.role === 'Admin' || admins.has(e);
+  const isAdmin = (u, e) => isAdminRole(u?.role) || admins.has(e);
   if (!isAdmin(user, email)) return false;
   const has = (e) => !!creds.users?.[String(e).toLowerCase()];
   const adminHasPassword = [...members.entries()].some(([e, u]) => isAdmin(u, e) && has(e)) || [...admins].some(has);
@@ -65,7 +66,7 @@ export default async function handler(req, res) {
         res.setHeader('Set-Cookie', makeSessionCookie(email, { secure, pwv: -1 }));
         return res.status(200).json({ success: true, mustChangePassword: true });
       }
-      if (user?.role === 'Admin' || adminEmails().has(email)) return res.status(401).json({ error: 'Email or password is incorrect.' });
+      if (isAdminRole(user?.role) || adminEmails().has(email)) return res.status(401).json({ error: 'Email or password is incorrect.' });
       return res.status(401).json({ error: 'No password has been set for this account yet. Ask your administrator.' });
     }
 

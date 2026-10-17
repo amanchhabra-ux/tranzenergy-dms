@@ -5,6 +5,7 @@ import { TAG, describe } from '../utils/activity';
 import {
   STAGE, stageName, categoryText, workflowOn, isExternal, canActOnStage, stageActors, dueState, stageLabel, waitingOn, openCommentCount,
 } from '../utils/workflow';
+import { isAdminRole } from '../utils/roles';
 
 const FILTERS = [
   { key: 'open', label: 'In review' },
@@ -118,7 +119,7 @@ const EVENT_TEXT = {
 /** Page: everything waiting on the signed-in person, plus recent review activity. */
 export function MyReviews({ onOpenDrawing }) {
   const { currentUser, projects, drawings } = useContext(AppContext);
-  const visibleProjects = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
+  const visibleProjects = projects.filter(p => isAdminRole(currentUser?.role) || p.assignedUsers?.includes(currentUser?.id));
   const ids = new Set(visibleProjects.map(p => p.id));
   const mine = waitingOn(currentUser, visibleProjects, drawings.filter(d => ids.has(d.projectId)));
   const since = Date.now() - 14 * 86400000;
@@ -198,7 +199,7 @@ export function MyReviews({ onOpenDrawing }) {
 /** Count for the sidebar badge. */
 export function useMyReviewCount() {
   const { currentUser, projects, drawings } = useContext(AppContext);
-  const visible = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
+  const visible = projects.filter(p => isAdminRole(currentUser?.role) || p.assignedUsers?.includes(currentUser?.id));
   const ids = new Set(visible.map(p => p.id));
   const list = waitingOn(currentUser, visible, drawings.filter(d => ids.has(d.projectId)));
   return { total: list.length, overdue: list.filter(x => x.due.kind === 'overdue').length };

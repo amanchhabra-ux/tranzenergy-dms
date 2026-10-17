@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Zap, FolderOpen, Radio, Wind,
   Sun, Battery, Shield, LogOut, ChevronRight, Settings, FileText, Database, KeyRound, Inbox } from 'lucide-react';
 import { isExternal } from '../utils/workflow';
+import { isAdminRole } from '../utils/roles';
 
 const TYPE_META = {
   transmission: { label: 'Transmission', icon: Zap,     color: '#2a4439' },
@@ -17,7 +18,7 @@ export function Sidebar({ activeView, activeProjectId, onNavigate, mobileOpen = 
   const { currentUser, projects, drawings, canDo, logout, authMode, org } = useContext(AppContext);
   const [showPw, setShowPw] = React.useState(false);
 
-  const filteredProjects = projects.filter(p => currentUser?.role === 'Admin' || p.assignedUsers?.includes(currentUser?.id));
+  const filteredProjects = projects.filter(p => isAdminRole(currentUser?.role) || p.assignedUsers?.includes(currentUser?.id));
 
   const drawingCount = (pid) => drawings.filter(d => d.projectId === pid).length;
 

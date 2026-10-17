@@ -148,15 +148,14 @@ await test('Project Manager assigning a consultant to another project -> 403', a
   assert.equal((await post(EMAIL.u2, { state: s, etag: null })).statusCode, 403);
 });
 
-await test('Project Manager creating a project for internal users -> 200; with a consultant -> 403', async () => {
+await test('Project Manager creating a project -> 403 super_only (only a Super User adds projects)', async () => {
   seed(baseState());
   const s = baseState();
   s.projects.push({ id: 'p3', code: 'NEW', assignedUsers: ['u1', 'u2'] });
-  assert.equal((await post(EMAIL.u2, { state: s, etag: null })).statusCode, 200);
-  seed(baseState());
-  const t = baseState();
-  t.projects.push({ id: 'p3', code: 'NEW', assignedUsers: ['u1', 'u2', 'u7'] });
-  assert.equal((await post(EMAIL.u2, { state: t, etag: null })).statusCode, 403);
+  const r = await post(EMAIL.u2, { state: s, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(r.body.error, 'super_only');
+  assert.equal(stored().projects.length, 2);
 });
 
 await test('admin changing another user\'s role -> 200', async () => {
@@ -862,6 +861,114 @@ await test('SESSION_SECRET unset with a storage key: flagged to admins by /api/m
       assert.equal(sessionSecretMissing(), false);
     });
   } finally { console.warn = warn; }
+});
+
+// ── Super User: adds projects, gives Viewers access, manages Admins ─────────
+const SUPER = { id: 'u0', name: 'Owner', email: 'owner@tranzenergy.in', role: 'Super User', avatar: 'OW', color: '#c2410c' };
+const withSuper = () => { const s = baseState(); s.users.unshift(structuredClone(SUPER)); return s; };
+const seedSuper = () => { seed(withSuper()); };
+
+await test('no Super User yet: an Admin still adds a project and assigns a Viewer (nothing changes on deploy)', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.projects.push({ id: 'p3', code: 'NEW', assignedUsers: ['u1', 'u5'] });
+  s.projects.find(p => p.id === 'p2').assignedUsers.push('u5');
+  const r = await post(EMAIL.u1, { state: s, etag: null });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+});
+
+await test('no Super User yet: an Admin makes themselves Super User -> 200; a second Admin then cannot -> 403', async () => {
+  const b = baseState();
+  b.users.push({ id: 'u8', name: 'Second Admin', email: 'admin2@tranzenergy.in', role: 'Admin' });
+  seed(b);
+  const s = structuredClone(b);
+  s.users.find(u => u.id === 'u1').role = 'Super User';
+  assert.equal((await post(EMAIL.u1, { state: s, etag: null })).statusCode, 200);
+  assert.equal(stored().users.find(u => u.id === 'u1').role, 'Super User');
+  const t = stored();
+  t.users.find(u => u.id === 'u8').role = 'Super User';
+  const r = await post('admin2@tranzenergy.in', { state: t, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(stored().users.find(u => u.id === 'u8').role, 'Admin');
+});
+
+await test('a Viewer cannot claim Super User even when there is none -> 403', async () => {
+  seed(baseState());
+  const s = baseState();
+  s.users.find(u => u.id === 'u5').role = 'Super User';
+  assert.equal((await post(EMAIL.u5, { state: s, etag: null })).statusCode, 403);
+});
+
+await test('with a Super User: Admin adding a project -> 403 super_only; Super User -> 200', async () => {
+  seedSuper();
+  const s = withSuper();
+  s.projects.push({ id: 'p3', code: 'NEW', assignedUsers: ['u1'] });
+  const r = await post(EMAIL.u1, { state: s, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(r.body.error, 'super_only');
+  const ok = await post(SUPER.email, { state: s, etag: null });
+  assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
+  assert.ok(stored().projects.some(p => p.id === 'p3'));
+});
+
+await test('with a Super User: Admin giving or removing a Viewer\'s project access -> 403; Super User -> 200', async () => {
+  seedSuper();
+  const add = withSuper();
+  add.projects.find(p => p.id === 'p2').assignedUsers.push('u5');
+  assert.equal((await post(EMAIL.u1, { state: add, etag: null })).statusCode, 403);
+  const rem = withSuper();
+  rem.projects.find(p => p.id === 'p1').assignedUsers = ['u1', 'u2', 'u7'];
+  assert.equal((await post(EMAIL.u1, { state: rem, etag: null })).statusCode, 403);
+  assert.deepEqual(stored().projects.find(p => p.id === 'p2').assignedUsers, ['u1', 'u2']);
+  const r = await post(SUPER.email, { state: add, etag: null });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.ok(stored().projects.find(p => p.id === 'p2').assignedUsers.includes('u5'));
+});
+
+await test('with a Super User: Admin still assigns non-Viewers and deletes projects -> 200', async () => {
+  seedSuper();
+  const s = withSuper();
+  s.projects.find(p => p.id === 'p2').assignedUsers = ['u1'];
+  assert.equal((await post(EMAIL.u1, { state: s, etag: null })).statusCode, 200);
+  seedSuper();
+  const d = withSuper();
+  d.projects = d.projects.filter(p => p.id !== 'p1');
+  assert.equal((await post(EMAIL.u1, { state: d, etag: null })).statusCode, 200);
+});
+
+await test('with a Super User: Admin adding an Admin or demoting the Super User -> 403; Super User adds an Admin -> 200', async () => {
+  seedSuper();
+  const s = withSuper();
+  s.users.push({ id: 'u9', name: 'New Admin', email: 'na@tranzenergy.in', role: 'Admin' });
+  const r = await post(EMAIL.u1, { state: s, etag: null });
+  assert.equal(r.statusCode, 403);
+  assert.equal(r.body.error, 'super_only');
+  const t = withSuper();
+  t.users.find(u => u.id === 'u0').role = 'Viewer';
+  assert.equal((await post(EMAIL.u1, { state: t, etag: null })).statusCode, 403);
+  const v = withSuper();
+  v.users.find(u => u.id === 'u5').role = 'Admin';
+  assert.equal((await post(EMAIL.u1, { state: v, etag: null })).statusCode, 403, 'promoting a Viewer to Admin');
+  assert.equal((await post(SUPER.email, { state: s, etag: null })).statusCode, 200);
+  assert.ok(stored().users.some(u => u.id === 'u9'));
+});
+
+await test('with a Super User: Admin still changes roles below Admin -> 200', async () => {
+  seedSuper();
+  const s = withSuper();
+  s.users.find(u => u.id === 'u5').role = 'Engineer';
+  assert.equal((await post(EMAIL.u1, { state: s, etag: null })).statusCode, 200);
+});
+
+await test('with a Super User: Admin resetting an Admin\'s password -> 403; Super User -> 200', async () => {
+  const b = withSuper();
+  b.users.push({ id: 'u8', name: 'Second Admin', email: 'admin2@tranzenergy.in', role: 'Admin' });
+  seed(b);
+  const pw = (await import('../api/admin-password.js')).default;
+  const body = { email: 'admin2@tranzenergy.in', password: 'NewPassw0rd!' };
+  assert.equal((await call(pw, EMAIL.u1, body)).statusCode, 403);
+  assert.equal((await call(pw, EMAIL.u1, { email: EMAIL.u2, password: 'NewPassw0rd!' })).statusCode, 200, 'below Admin is fine');
+  assert.equal((await call(pw, SUPER.email, body)).statusCode, 200);
 });
 
 const failed = results.filter(r => !r[0]).length;
